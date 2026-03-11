@@ -39,3 +39,20 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# lock files (using npm)
+pnpm-lock.yaml
+yarn.lock
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# docs/plans (internal dev notes)
+docs/plans/

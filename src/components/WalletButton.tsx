@@ -3,22 +3,49 @@
 import { useState, useEffect } from "react";
 import { Wallet, LogOut, Copy, CheckCircle, ExternalLink } from "lucide-react";
 import { useAutoFiStore } from "@/store/useAutoFiStore";
+import fcl from "@/lib/fcl";
 
 export default function WalletButton() {
-  const { walletAddress, isConnected, setWallet } = useAutoFiStore();
+  const { walletAddress, isConnected, setWallet, isDemoMode, setDemoMode } = useAutoFiStore();
   const [copied, setCopied] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
-  const DEMO_ADDRESS = "0x1a2b3c4d5e6f7890";
+  // Subscribe to FCL current user
+  useEffect(() => {
+    if (isDemoMode) return;
+    const unsub = fcl.currentUser.subscribe((user: { addr?: string | null }) => {
+      if (user?.addr) {
+        setWallet(user.addr);
+      }
+    });
+    return () => unsub();
+  }, [isDemoMode, setWallet]);
 
   const connect = async () => {
-    // In production: await fcl.authenticate()
-    setWallet(DEMO_ADDRESS);
+    setConnecting(true);
+    try {
+      await fcl.authenticate();
+    } catch {
+      // If FCL fails (no wallet extension), fall back to demo
+      setDemoMode(true);
+      setWallet("0x1a2b3c4d5e6f7890");
+    }
+    setConnecting(false);
   };
 
-  const disconnect = () => {
-    setWallet(null);
+  const connectDemo = () => {
+    setDemoMode(true);
+    setWallet("0x1a2b3c4d5e6f7890");
+  };
+
+  const disconnect = async () => {
     setShowDropdown(false);
+    if (!isDemoMode) {
+      await fcl.unauthenticate();
+    }
+    setWallet(null);
+    setDemoMode(false);
   };
 
   const copyAddress = () => {
@@ -35,121 +62,70 @@ export default function WalletButton() {
 
   if (!isConnected) {
     return (
-      <button onClick={connect} className="btn-primary" style={{ width: "100%", justifyContent: "center" }}>
-        <Wallet size={16} />
-        Connect Wallet
-      </button>
+      <div className="flex flex-col gap-1.5">
+        <button
+          onClick={connect}
+          disabled={connecting}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium cursor-pointer bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition-colors duration-150 disabled:opacity-50"
+        >
+          <Wallet size={14} />
+          {connecting ? "Connecting..." : "Connect Wallet"}
+        </button>
+        <button
+          onClick={connectDemo}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-mono cursor-pointer bg-transparent border border-zinc-800 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 transition-colors duration-150"
+        >
+          Demo Mode
+        </button>
+      </div>
     );
   }
 
   return (
-    <div style={{ position: "relative" }}>
+    <div className="relative">
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        style={{
-          width: "100%",
-          background: "rgba(99,102,241,0.08)",
-          border: "1px solid rgba(99,102,241,0.2)",
-          borderRadius: 10,
-          padding: "10px 12px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          cursor: "pointer",
-          transition: "all 0.15s",
-        }}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer bg-zinc-800/50 border border-zinc-700/50 hover:border-zinc-600 transition-colors duration-150"
       >
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
-            background: "var(--gradient-brand)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 13,
-          }}
-        >
-          🔐
-        </div>
-        <div style={{ flex: 1, textAlign: "left" }}>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1 }}>Connected</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-accent)", lineHeight: 1.4 }}>
+        <Wallet size={14} className="text-amber-500" />
+        <div className="flex-1 text-left min-w-0">
+          <span className="font-mono text-xs text-zinc-300 block truncate">
             {shortAddr}
-          </div>
+          </span>
         </div>
+        {isDemoMode && (
+          <span className="text-[8px] font-mono text-zinc-600 border border-zinc-800 px-1 py-0.5 rounded uppercase">
+            demo
+          </span>
+        )}
         <div className="pulse-dot" />
       </button>
 
       {showDropdown && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "calc(100% + 8px)",
-            left: 0,
-            right: 0,
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-glow)",
-            borderRadius: 12,
-            overflow: "hidden",
-            boxShadow: "0 -8px 30px rgba(0,0,0,0.4)",
-            zIndex: 100,
-          }}
-        >
+        <div className="absolute bottom-full left-0 right-0 mb-2 bg-zinc-900 border border-zinc-700 rounded-md overflow-hidden shadow-lg shadow-black/40 z-50">
           <button
             onClick={copyAddress}
-            style={{
-              width: "100%",
-              background: "none",
-              border: "none",
-              padding: "12px 16px",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              cursor: "pointer",
-              color: "var(--text-secondary)",
-              fontSize: 13,
-              borderBottom: "1px solid var(--border-subtle)",
-            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 cursor-pointer border-b border-zinc-800 bg-transparent border-l-0 border-r-0 border-t-0"
           >
-            {copied ? <CheckCircle size={15} color="var(--accent-success)" /> : <Copy size={15} />}
-            {copied ? "Copied!" : "Copy Address"}
+            {copied ? <CheckCircle size={13} className="text-amber-500" /> : <Copy size={13} />}
+            {copied ? "Copied" : "Copy Address"}
           </button>
-          <a
-            href={`https://testnet.flowscan.io/account/${walletAddress}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "12px 16px",
-              textDecoration: "none",
-              color: "var(--text-secondary)",
-              fontSize: 13,
-              borderBottom: "1px solid var(--border-subtle)",
-            }}
-          >
-            <ExternalLink size={15} />
-            View on Flowscan
-          </a>
+          {!isDemoMode && (
+            <a
+              href={`https://testnet.flowscan.io/account/${walletAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 no-underline border-b border-zinc-800"
+            >
+              <ExternalLink size={13} />
+              Flowscan
+            </a>
+          )}
           <button
             onClick={disconnect}
-            style={{
-              width: "100%",
-              background: "none",
-              border: "none",
-              padding: "12px 16px",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              cursor: "pointer",
-              color: "var(--accent-danger)",
-              fontSize: 13,
-            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-zinc-800 cursor-pointer bg-transparent border-0"
           >
-            <LogOut size={15} />
+            <LogOut size={13} />
             Disconnect
           </button>
         </div>
