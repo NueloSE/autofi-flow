@@ -1,13 +1,13 @@
-/// get_vault_balance.cdc
-/// Returns the FLOW balance in a user's AutoFi vault.
+/// get_strategies.cdc
+/// Returns all strategies for a user's AutoFi vault.
 
 import "AutoFi"
 
-access(all) fun main(address: Address): UFix64 {
+access(all) fun main(address: Address): [AutoFi.Strategy] {
     let account = getAccount(address)
 
     let vaultRef = account.capabilities.borrow<&{AutoFi.VaultPublic}>(AutoFi.VaultPublicPath)
         ?? panic("AutoFi vault not found for this address")
 
-    return vaultRef.getBalance()
+    return vaultRef.getStrategies()
 }
