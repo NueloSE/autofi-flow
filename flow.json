@@ -1,0 +1,41 @@
+{
+  "networks": {
+    "emulator": "127.0.0.1:3569",
+    "mainnet": "access.mainnet.nodes.onflow.org:9000",
+    "sandboxnet": "access.sandboxnet.nodes.onflow.org:9000",
+    "testnet": "access.devnet.nodes.onflow.org:9000"
+  },
+  "accounts": {
+    "emulator-account": {
+      "address": "f8d6e0586b0a20c7",
+      "key": "2eae2f31cb5b756151fa11d82949c634b8f28796a40d16a534e63a869f9e3b6e"
+    },
+    "testnet-account": {
+      "address": "YOUR_TESTNET_ADDRESS",
+      "key": {
+        "type": "hex",
+        "index": 0,
+        "signatureAlgorithm": "ECDSA_P256",
+        "hashAlgorithm": "SHA3_256",
+        "privateKey": "YOUR_PRIVATE_KEY"
+      }
+    }
+  },
+  "contracts": {
+    "AutoFiEngine": {
+      "source": "./cadence/contracts/AutoFiEngine.cdc",
+      "aliases": {
+        "emulator": "f8d6e0586b0a20c7",
+        "testnet": "YOUR_TESTNET_ADDRESS"
+      }
+    }
+  },
+  "deployments": {
+    "emulator": {
+      "emulator-account": ["AutoFiEngine"]
+    },
+    "testnet": {
+      "testnet-account": ["AutoFiEngine"]
+    }
+  }
+}
