@@ -15,11 +15,13 @@ const ADDRESSES: Record<string, Record<string, string>> = {
     AutoFi: "0x902e1baab3b18cac",
     FungibleToken: "0x9a0766d93b6608b7",
     FlowToken: "0x7e60df042a9c0868",
+    Scheduler: "0x8c5303eaa26202d6",
   },
   emulator: {
     AutoFi: "0xf8d6e0586b0a20c7",
     FungibleToken: "0xee82856bf20e2aa6",
     FlowToken: "0x0ae53cb6e3f42a79",
+    Scheduler: "0xf8d6e0586b0a20c7",
   },
 };
 
@@ -36,7 +38,8 @@ function cdc(template: string): string {
   return template
     .replace(/__AUTOFI__/g, addr("AutoFi"))
     .replace(/__FUNGIBLE_TOKEN__/g, addr("FungibleToken"))
-    .replace(/__FLOW_TOKEN__/g, addr("FlowToken"));
+    .replace(/__FLOW_TOKEN__/g, addr("FlowToken"))
+    .replace(/__SCHEDULER__/g, addr("Scheduler"));
 }
 
 function toUFix64(num: number): string {
@@ -172,6 +175,135 @@ transaction(strategyID: UInt64) {
             from: AutoFi.VaultStoragePath
         ) ?? panic("AutoFi vault not found.")
         vault.executeStrategy(id: strategyID)
+    }
+}
+`;
+
+const CREATE_SCHEDULED_STRATEGY = `
+import AutoFi from __AUTOFI__
+import AutoFiScheduler from __AUTOFI__
+import FlowTransactionScheduler from __SCHEDULER__
+import FlowTransactionSchedulerUtils from __SCHEDULER__
+import FungibleToken from __FUNGIBLE_TOKEN__
+import FlowToken from __FLOW_TOKEN__
+
+transaction(
+    strategyTypeRaw: UInt8,
+    token: String,
+    amountPerExecution: UFix64,
+    intervalSeconds: UInt64,
+    maxMonthlySpend: UFix64,
+    slippageTolerance: UFix64,
+    description: String
+) {
+    prepare(signer: auth(Storage, Capabilities, BorrowValue) &Account) {
+        // 1. Create the strategy
+        let vault = signer.storage.borrow<auth(AutoFi.Owner) &AutoFi.Vault>(
+            from: AutoFi.VaultStoragePath
+        ) ?? panic("AutoFi vault not found. Run setup_account first.")
+
+        let strategyType = AutoFi.StrategyType(rawValue: strategyTypeRaw)
+            ?? panic("Invalid strategy type")
+
+        let strategyID = vault.createStrategy(
+            strategyType: strategyType,
+            token: token,
+            amountPerExecution: amountPerExecution,
+            intervalSeconds: intervalSeconds,
+            maxMonthlySpend: maxMonthlySpend,
+            slippageTolerance: slippageTolerance,
+            description: description
+        )
+
+        // 2. Setup Scheduler Manager (once per account)
+        if !signer.storage.check<@{FlowTransactionSchedulerUtils.Manager}>(
+            from: FlowTransactionSchedulerUtils.managerStoragePath
+        ) {
+            let manager <- FlowTransactionSchedulerUtils.createManager()
+            signer.storage.save(<-manager, to: FlowTransactionSchedulerUtils.managerStoragePath)
+            let managerCap = signer.capabilities.storage.issue<
+                &{FlowTransactionSchedulerUtils.Manager}
+            >(FlowTransactionSchedulerUtils.managerStoragePath)
+            signer.capabilities.publish(managerCap, at: FlowTransactionSchedulerUtils.managerPublicPath)
+        }
+
+        // 3. Setup Handler (once per account)
+        let handlerPath = AutoFiScheduler.HandlerStoragePath
+        if !signer.storage.check<@AutoFiScheduler.Handler>(from: handlerPath) {
+            let vaultCap = signer.capabilities.storage.issue<
+                auth(AutoFi.Execute) &AutoFi.Vault
+            >(AutoFi.VaultStoragePath)
+
+            let flowVaultCap = signer.capabilities.storage.issue<
+                auth(FungibleToken.Withdraw) &FlowToken.Vault
+            >(/storage/flowTokenVault)
+
+            let managerCap = signer.capabilities.storage.issue<
+                auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}
+            >(FlowTransactionSchedulerUtils.managerStoragePath)
+
+            let handler <- AutoFiScheduler.createHandler(
+                vaultCap: vaultCap,
+                flowVaultCap: flowVaultCap,
+                managerCap: managerCap
+            )
+            signer.storage.save(<-handler, to: handlerPath)
+
+            let publicCap = signer.capabilities.storage.issue<
+                &{FlowTransactionScheduler.TransactionHandler}
+            >(handlerPath)
+            signer.capabilities.publish(publicCap, at: AutoFiScheduler.HandlerPublicPath)
+        }
+
+        // 4. Get Execute-entitled handler capability
+        var handlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>? = nil
+        let controllers = signer.capabilities.storage.getControllers(forPath: handlerPath)
+        for controller in controllers {
+            if let cap = controller.capability as? Capability<
+                auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}
+            > {
+                handlerCap = cap
+                break
+            }
+        }
+        if handlerCap == nil {
+            handlerCap = signer.capabilities.storage.issue<
+                auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}
+            >(handlerPath)
+        }
+
+        // 5. Calculate scheduling fee
+        let priority = FlowTransactionScheduler.Priority.Medium
+        let executionEffort: UInt64 = 5000
+        let fee = FlowTransactionScheduler.calculateFee(
+            executionEffort: executionEffort,
+            priority: priority,
+            dataSizeMB: 0.0
+        )
+
+        // 6. Withdraw fee from user's FLOW wallet
+        let flowVault = signer.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(
+            from: /storage/flowTokenVault
+        ) ?? panic("Could not borrow FLOW vault for scheduling fee")
+        let fees <- flowVault.withdraw(amount: fee) as! @FlowToken.Vault
+
+        // 7. Schedule first execution
+        let strategy = vault.getStrategy(id: strategyID)
+            ?? panic("Strategy just created but not found")
+
+        let manager = signer.storage.borrow<
+            auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}
+        >(from: FlowTransactionSchedulerUtils.managerStoragePath)
+            ?? panic("Could not borrow Scheduler Manager")
+
+        let _ = manager.schedule(
+            handlerCap: handlerCap!,
+            data: strategyID,
+            timestamp: strategy.nextExecution,
+            priority: priority,
+            executionEffort: executionEffort,
+            fees: <-fees
+        )
     }
 }
 `;
@@ -373,6 +505,33 @@ export async function txCreateStrategy(params: {
       arg(params.description, t.String),
     ],
     limit: 200,
+  });
+  await sealWithTimeout(txId);
+  return txId;
+}
+
+export async function txCreateScheduledStrategy(params: {
+  strategyType: string;
+  token: string;
+  amountPerExecution: number;
+  intervalSeconds: number;
+  maxMonthlySpend: number;
+  slippageTolerance: number;
+  description: string;
+}): Promise<string> {
+  const typeRaw = STRATEGY_TYPE_MAP[params.strategyType] ?? 0;
+  const txId = await fcl.mutate({
+    cadence: cdc(CREATE_SCHEDULED_STRATEGY),
+    args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
+      arg(typeRaw.toString(), t.UInt8),
+      arg(params.token, t.String),
+      arg(toUFix64(params.amountPerExecution), t.UFix64),
+      arg(params.intervalSeconds.toString(), t.UInt64),
+      arg(toUFix64(params.maxMonthlySpend), t.UFix64),
+      arg(toUFix64(params.slippageTolerance), t.UFix64),
+      arg(params.description, t.String),
+    ],
+    limit: 500,
   });
   await sealWithTimeout(txId);
   return txId;

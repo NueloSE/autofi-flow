@@ -10,6 +10,7 @@ import {
   txWithdraw,
   txWithdrawTo,
   txCreateStrategy,
+  txCreateScheduledStrategy,
   txExecuteStrategy,
   txCancelStrategy,
   queryVaultBalance,
@@ -182,6 +183,22 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, [walletAddress, refreshOnChainData]);
 
+  // Auto-poll on-chain data every 15s so scheduled executions appear without manual refresh
+  useEffect(() => {
+    if (!walletAddress) return;
+    const interval = setInterval(() => {
+      refreshOnChainData();
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [walletAddress, refreshOnChainData]);
+
+  // Tick every second so countdown timers and "executing" states update live
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const activeRules = rules.filter((r) => r.active);
   const totalInvested = rules.reduce((s, r) => s + r.totalSpent, 0);
   const totalExecutions = rules.reduce((s, r) => s + r.executionCount, 0);
@@ -225,17 +242,25 @@ export default function DashboardPage() {
 
   const createFromParsed = async () => {
     if (!parsedRule || !isConnected) return;
+    const strategyParams = {
+      strategyType: parsedRule.ruleType!,
+      token: parsedRule.token!,
+      amountPerExecution: parsedRule.amount!,
+      intervalSeconds: parsedRule.interval || 604800,
+      maxMonthlySpend: 0,
+      slippageTolerance: 2,
+      description: parsedRule.description || "",
+    };
     await sendTx(
-      () => txCreateStrategy({
-        strategyType: parsedRule.ruleType!,
-        token: parsedRule.token!,
-        amountPerExecution: parsedRule.amount!,
-        intervalSeconds: parsedRule.interval || 604800,
-        maxMonthlySpend: 0,
-        slippageTolerance: 2,
-        description: parsedRule.description || "",
-      }),
-      "Strategy created on-chain",
+      async () => {
+        try {
+          return await txCreateScheduledStrategy(strategyParams);
+        } catch {
+          // Fallback to non-scheduled if scheduler not deployed yet
+          return await txCreateStrategy(strategyParams);
+        }
+      },
+      "Strategy created & scheduled for auto-execution",
     );
     setCommandInput("");
     setParsedRule(null);
@@ -256,17 +281,25 @@ export default function DashboardPage() {
     else if (manualType === "PRICE_DIP_BUY") description = `Buy $${amount} of ${manualToken} when price drops ${manualPricePct}%`;
     else if (manualType === "PROFIT_SELL") description = `Sell $${amount} of ${manualToken} when price rises ${manualPricePct}%`;
 
+    const strategyParams = {
+      strategyType: manualType,
+      token: manualToken,
+      amountPerExecution: amount,
+      intervalSeconds: isPriceTrig ? 86400 : manualInterval,
+      maxMonthlySpend: 0,
+      slippageTolerance: 2,
+      description,
+    };
     await sendTx(
-      () => txCreateStrategy({
-        strategyType: manualType,
-        token: manualToken,
-        amountPerExecution: amount,
-        intervalSeconds: isPriceTrig ? 86400 : manualInterval,
-        maxMonthlySpend: 0,
-        slippageTolerance: 2,
-        description,
-      }),
-      "Strategy created on-chain",
+      async () => {
+        try {
+          return await txCreateScheduledStrategy(strategyParams);
+        } catch {
+          // Fallback to non-scheduled if scheduler not deployed yet
+          return await txCreateStrategy(strategyParams);
+        }
+      },
+      "Strategy created & scheduled for auto-execution",
     );
   };
 
@@ -950,6 +983,19 @@ function StatCard({
   );
 }
 
+function formatCountdown(target: Date): string {
+  const diff = Math.max(0, target.getTime() - Date.now());
+  if (diff === 0) return "now";
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+}
+
 function StrategyRow({
   rule,
   mounted,
@@ -963,19 +1009,30 @@ function StrategyRow({
   onExecute: () => void;
   onCancel: () => void;
 }) {
-  const statusColor = rule.active
-    ? "bg-amber-500"
-    : rule.status === "paused"
-    ? "bg-yellow-600"
-    : "bg-zinc-600";
+  const now = Date.now();
+  const nextExecTime = rule.nextExecution ? new Date(rule.nextExecution).getTime() : 0;
+  const isReady = mounted && rule.active && nextExecTime > 0 && nextExecTime <= now;
+
+  const statusColor = !rule.active
+    ? "bg-zinc-600"
+    : isReady
+    ? "bg-green-500"
+    : "bg-amber-500";
 
   return (
     <div
       className={`flex items-center gap-3 px-4 py-3.5 group hover:bg-zinc-800/20 transition-colors duration-150
         ${!isLast ? "border-b border-zinc-800/40" : ""}
-        ${!rule.active ? "opacity-35" : ""}`}
+        ${!rule.active ? "opacity-35" : ""}
+        ${isReady ? "bg-green-500/[0.03]" : ""}`}
     >
-      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusColor}`} />
+      {/* Status dot — pulses when executing */}
+      <div className="relative shrink-0">
+        <div className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
+        {isReady && (
+          <div className="absolute inset-0 w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
+        )}
+      </div>
       <RuleTypeBadge type={rule.ruleType} />
       <span className="text-sm font-mono text-zinc-300 flex-1 min-w-0 truncate">
         {rule.description}
@@ -987,17 +1044,28 @@ function StrategyRow({
       <span className="text-[10px] font-mono text-zinc-600 shrink-0 tabular-nums">
         {rule.executionCount}x run
       </span>
-      {rule.nextExecution && rule.active && (() => {
-        const isReady = mounted && new Date(rule.nextExecution) <= new Date();
-        return (
-          <>
-            <div className="w-px h-3 bg-zinc-800 shrink-0" />
-            <span className={`text-[10px] font-mono shrink-0 tabular-nums ${isReady ? "text-green-500" : "text-zinc-600"}`}>
-              {!mounted ? "---" : isReady ? "ready" : formatDistanceToNow(new Date(rule.nextExecution), { addSuffix: false })}
+      {rule.nextExecution && rule.active && (
+        <>
+          <div className="w-px h-3 bg-zinc-800 shrink-0" />
+          {!mounted ? (
+            <span className="text-[10px] font-mono text-zinc-600 shrink-0">---</span>
+          ) : isReady ? (
+            // Just passed nextExecution — show "ready" with green dot;
+            // auto-poll will update once the scheduled tx fires
+            <span className="text-[10px] font-mono text-green-500 shrink-0 flex items-center gap-1">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+              </span>
+              ready
             </span>
-          </>
-        );
-      })()}
+          ) : (
+            <span className="text-[10px] font-mono text-zinc-500 shrink-0 tabular-nums">
+              {formatCountdown(new Date(rule.nextExecution))}
+            </span>
+          )}
+        </>
+      )}
       {rule.active && (
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
           <button

@@ -6,6 +6,12 @@
 				"emulator": "f8d6e0586b0a20c7",
 				"testnet": "902e1baab3b18cac"
 			}
+		},
+		"AutoFiScheduler": {
+			"source": "./cadence/contracts/AutoFiScheduler.cdc",
+			"aliases": {
+				"testnet": "902e1baab3b18cac"
+			}
 		}
 	},
 	"dependencies": {
@@ -78,6 +84,20 @@
 				"mainnet": "1d7e57aa55817448",
 				"testnet": "631e88ae7f1d7c20"
 			}
+		},
+		"FlowTransactionScheduler": {
+			"source": "testnet://8c5303eaa26202d6.FlowTransactionScheduler",
+			"aliases": {
+				"testnet": "8c5303eaa26202d6",
+				"mainnet": "e467b9dd11fa00df"
+			}
+		},
+		"FlowTransactionSchedulerUtils": {
+			"source": "testnet://8c5303eaa26202d6.FlowTransactionSchedulerUtils",
+			"aliases": {
+				"testnet": "8c5303eaa26202d6",
+				"mainnet": "e467b9dd11fa00df"
+			}
 		}
 	},
 	"networks": {
@@ -103,7 +123,8 @@
 		},
 		"testnet": {
 			"testnet-account": [
-				"AutoFi"
+				"AutoFi",
+				"AutoFiScheduler"
 			]
 		}
 	}
