@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Shield } from "lucide-react";
+import { LayoutDashboard, Shield, Loader2 } from "lucide-react";
 import { useAutoFiStore } from "@/store/useAutoFiStore";
+import { txEmergencyStop, txResumeAll, queryIsEmergencyStopped } from "@/lib/flow-transactions";
+import { parseFriendlyError } from "@/lib/parse-error";
 import WalletButton from "./WalletButton";
 
 const NAV_ITEMS = [
@@ -12,7 +15,27 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { allPaused, pauseAllRules, resumeAllRules } = useAutoFiStore();
+  const { allPaused, setAllPaused, walletAddress, isConnected } = useAutoFiStore();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleEmergencyToggle = async () => {
+    if (!isConnected || !walletAddress || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      if (allPaused) {
+        await txResumeAll();
+      } else {
+        await txEmergencyStop();
+      }
+      const stopped = await queryIsEmergencyStopped(walletAddress);
+      setAllPaused(stopped);
+    } catch (err) {
+      setError(parseFriendlyError(err));
+    }
+    setLoading(false);
+  };
 
   return (
     <aside className="app-sidebar">
@@ -53,21 +76,31 @@ export default function Sidebar() {
       <div className="p-3 border-t border-zinc-800/60 flex flex-col gap-2">
         {/* Emergency Stop */}
         <button
-          onClick={allPaused ? resumeAllRules : pauseAllRules}
+          onClick={handleEmergencyToggle}
+          disabled={!isConnected || loading}
           className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-xs font-medium cursor-pointer transition-colors duration-150
             ${allPaused
               ? "bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700"
               : "bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20"
             }`}
         >
-          <Shield size={13} />
-          {allPaused ? "Resume All" : "Emergency Stop"}
+          {loading ? <Loader2 size={13} className="animate-spin" /> : <Shield size={13} />}
+          {loading ? "Processing..." : allPaused ? "Resume All" : "Emergency Stop"}
         </button>
 
         {allPaused && (
           <div className="text-[10px] text-red-400 text-center font-mono">
             All rules paused
           </div>
+        )}
+
+        {error && (
+          <button
+            onClick={() => setError("")}
+            className="text-[10px] text-red-400 text-center font-mono bg-red-500/5 border border-red-500/20 rounded px-2 py-1.5 cursor-pointer hover:bg-red-500/10 transition-colors"
+          >
+            {error}
+          </button>
         )}
 
         {/* Wallet */}

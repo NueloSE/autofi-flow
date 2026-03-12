@@ -3,7 +3,8 @@
 		"AutoFi": {
 			"source": "./cadence/contracts/AutoFi.cdc",
 			"aliases": {
-				"emulator": "f8d6e0586b0a20c7"
+				"emulator": "f8d6e0586b0a20c7",
+				"testnet": "902e1baab3b18cac"
 			}
 		}
 	},
@@ -88,11 +89,20 @@
 		"emulator-account": {
 			"address": "f8d6e0586b0a20c7",
 			"key": "2eae2f31cb5b756151fa11d82949c634b8f28796a40d16a534e63a869f9e3b6e"
+		},
+		"testnet-account": {
+			"address": "0x902e1baab3b18cac",
+			"key": "0c7441592a07b6cc3c07a2814ee073499a858ceb192979010a36ccb869c5cbb1"
 		}
 	},
 	"deployments": {
 		"emulator": {
 			"emulator-account": [
+				"AutoFi"
+			]
+		},
+		"testnet": {
+			"testnet-account": [
 				"AutoFi"
 			]
 		}

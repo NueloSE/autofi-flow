@@ -1,5 +1,6 @@
-// Flow transaction helpers — sends Cadence transactions/scripts via FCL
-// In demo mode, falls back to local Zustand store operations
+// Flow transaction/script helpers via FCL
+// When isDemoMode is true, the dashboard uses Zustand store directly.
+// When connected to a real wallet, these functions send real Cadence transactions.
 
 import fcl from "@/lib/fcl";
 
@@ -11,7 +12,7 @@ const FLOW_NETWORK = process.env.NEXT_PUBLIC_FLOW_NETWORK || "testnet";
 
 const ADDRESSES: Record<string, Record<string, string>> = {
   testnet: {
-    AutoFi: "YOUR_TESTNET_ADDRESS", // TODO: replace after deploy
+    AutoFi: "0x902e1baab3b18cac",
     FungibleToken: "0x9a0766d93b6608b7",
     FlowToken: "0x7e60df042a9c0868",
   },
@@ -28,11 +29,26 @@ function addr(contract: string): string {
 }
 
 // ──────────────────────────────────────────────
-// Transaction CDC templates (inline for Next.js)
+// CDC helper — replaces __CONTRACT__ placeholders
+// ──────────────────────────────────────────────
+
+function cdc(template: string): string {
+  return template
+    .replace(/__AUTOFI__/g, addr("AutoFi"))
+    .replace(/__FUNGIBLE_TOKEN__/g, addr("FungibleToken"))
+    .replace(/__FLOW_TOKEN__/g, addr("FlowToken"));
+}
+
+function toUFix64(num: number): string {
+  return num.toFixed(8);
+}
+
+// ──────────────────────────────────────────────
+// Transaction templates
 // ──────────────────────────────────────────────
 
 const SETUP_ACCOUNT = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 transaction {
     prepare(signer: auth(Storage, Capabilities) &Account) {
@@ -48,9 +64,9 @@ transaction {
 `;
 
 const DEPOSIT = `
-import FungibleToken from ${() => addr("FungibleToken")}
-import FlowToken from ${() => addr("FlowToken")}
-import AutoFi from ${() => addr("AutoFi")}
+import FungibleToken from __FUNGIBLE_TOKEN__
+import FlowToken from __FLOW_TOKEN__
+import AutoFi from __AUTOFI__
 
 transaction(amount: UFix64) {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
@@ -67,9 +83,9 @@ transaction(amount: UFix64) {
 `;
 
 const WITHDRAW = `
-import FungibleToken from ${() => addr("FungibleToken")}
-import FlowToken from ${() => addr("FlowToken")}
-import AutoFi from ${() => addr("AutoFi")}
+import FungibleToken from __FUNGIBLE_TOKEN__
+import FlowToken from __FLOW_TOKEN__
+import AutoFi from __AUTOFI__
 
 transaction(amount: UFix64) {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
@@ -85,8 +101,28 @@ transaction(amount: UFix64) {
 }
 `;
 
+const WITHDRAW_TO = `
+import FungibleToken from __FUNGIBLE_TOKEN__
+import FlowToken from __FLOW_TOKEN__
+import AutoFi from __AUTOFI__
+
+transaction(amount: UFix64, recipient: Address) {
+    prepare(signer: auth(Storage, BorrowValue) &Account) {
+        let autoFiVault = signer.storage.borrow<auth(AutoFi.Owner) &AutoFi.Vault>(
+            from: AutoFi.VaultStoragePath
+        ) ?? panic("AutoFi vault not found.")
+        let withdrawn <- autoFiVault.withdraw(amount: amount)
+        let recipientAccount = getAccount(recipient)
+        let receiverRef = recipientAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+            /public/flowTokenReceiver
+        ) ?? panic("Could not borrow recipient's FLOW receiver. Make sure the address is correct.")
+        receiverRef.deposit(from: <-withdrawn)
+    }
+}
+`;
+
 const CREATE_STRATEGY = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 transaction(
     strategyTypeRaw: UInt8,
@@ -117,7 +153,7 @@ transaction(
 `;
 
 const CANCEL_STRATEGY = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 transaction(strategyID: UInt64) {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
@@ -130,7 +166,7 @@ transaction(strategyID: UInt64) {
 `;
 
 const PAUSE_STRATEGY = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 transaction(strategyID: UInt64) {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
@@ -143,7 +179,7 @@ transaction(strategyID: UInt64) {
 `;
 
 const RESUME_STRATEGY = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 transaction(strategyID: UInt64) {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
@@ -156,7 +192,7 @@ transaction(strategyID: UInt64) {
 `;
 
 const EMERGENCY_STOP = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 transaction {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
@@ -169,7 +205,7 @@ transaction {
 `;
 
 const RESUME_ALL = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 transaction {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
@@ -182,64 +218,70 @@ transaction {
 `;
 
 // ──────────────────────────────────────────────
-// Script CDC templates
+// Script templates (graceful — return defaults if no vault)
 // ──────────────────────────────────────────────
 
 const GET_VAULT_BALANCE = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 access(all) fun main(address: Address): UFix64 {
     let account = getAccount(address)
     let vaultRef = account.capabilities.borrow<&{AutoFi.VaultPublic}>(AutoFi.VaultPublicPath)
-        ?? panic("AutoFi vault not found for this address")
-    return vaultRef.getBalance()
+    if vaultRef == nil { return 0.0 }
+    return vaultRef!.getBalance()
 }
 `;
 
 const GET_STRATEGIES = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 access(all) fun main(address: Address): [AutoFi.Strategy] {
     let account = getAccount(address)
     let vaultRef = account.capabilities.borrow<&{AutoFi.VaultPublic}>(AutoFi.VaultPublicPath)
-        ?? panic("AutoFi vault not found for this address")
-    return vaultRef.getStrategies()
+    if vaultRef == nil { return [] }
+    return vaultRef!.getStrategies()
 }
 `;
 
 const GET_EXECUTION_HISTORY = `
-import AutoFi from ${() => addr("AutoFi")}
+import AutoFi from __AUTOFI__
 
 access(all) fun main(address: Address): [AutoFi.ExecutionRecord] {
     let account = getAccount(address)
     let vaultRef = account.capabilities.borrow<&{AutoFi.VaultPublic}>(AutoFi.VaultPublicPath)
-        ?? panic("AutoFi vault not found for this address")
-    return vaultRef.getExecutionLog()
+    if vaultRef == nil { return [] }
+    return vaultRef!.getExecutionLog()
+}
+`;
+
+const IS_EMERGENCY_STOPPED = `
+import AutoFi from __AUTOFI__
+
+access(all) fun main(address: Address): Bool {
+    let account = getAccount(address)
+    let vaultRef = account.capabilities.borrow<&{AutoFi.VaultPublic}>(AutoFi.VaultPublicPath)
+    if vaultRef == nil { return false }
+    return vaultRef!.isEmergencyStopped()
 }
 `;
 
 // ──────────────────────────────────────────────
-// Helper: resolve CDC template (replace address closures)
+// Strategy type mapping (frontend string → Cadence UInt8)
 // ──────────────────────────────────────────────
 
-function cdc(template: string): string {
-  // Replace ${() => addr("X")} patterns with actual addresses
-  return template.replace(/\$\{.*?addr\("(\w+)"\).*?\}/g, (_, contract) => addr(contract));
-}
-
-// ──────────────────────────────────────────────
-// Format helpers
-// ──────────────────────────────────────────────
-
-function toUFix64(num: number): string {
-  return num.toFixed(8);
-}
+const STRATEGY_TYPE_MAP: Record<string, number> = {
+  DCA_INVEST: 0,
+  SAVINGS_TRANSFER: 1,
+  SUBSCRIPTION_PAYMENT: 2,
+  PRICE_DIP_BUY: 3,
+  PROFIT_SELL: 4,
+};
 
 // ──────────────────────────────────────────────
 // Public API — Transactions
 // ──────────────────────────────────────────────
 
-export async function setupAccount(): Promise<string> {
+export async function txSetupAccount(): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(SETUP_ACCOUNT),
     limit: 100,
@@ -248,7 +290,7 @@ export async function setupAccount(): Promise<string> {
   return txId;
 }
 
-export async function deposit(amount: number): Promise<string> {
+export async function txDeposit(amount: number): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(DEPOSIT),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
@@ -260,7 +302,7 @@ export async function deposit(amount: number): Promise<string> {
   return txId;
 }
 
-export async function withdraw(amount: number): Promise<string> {
+export async function txWithdraw(amount: number): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(WITHDRAW),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
@@ -272,8 +314,21 @@ export async function withdraw(amount: number): Promise<string> {
   return txId;
 }
 
-export async function createStrategy(params: {
-  strategyType: number;
+export async function txWithdrawTo(amount: number, recipient: string): Promise<string> {
+  const txId = await fcl.mutate({
+    cadence: cdc(WITHDRAW_TO),
+    args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
+      arg(toUFix64(amount), t.UFix64),
+      arg(recipient, t.Address),
+    ],
+    limit: 100,
+  });
+  await fcl.tx(txId).onceSealed();
+  return txId;
+}
+
+export async function txCreateStrategy(params: {
+  strategyType: string;
   token: string;
   amountPerExecution: number;
   intervalSeconds: number;
@@ -281,10 +336,11 @@ export async function createStrategy(params: {
   slippageTolerance: number;
   description: string;
 }): Promise<string> {
+  const typeRaw = STRATEGY_TYPE_MAP[params.strategyType] ?? 0;
   const txId = await fcl.mutate({
     cadence: cdc(CREATE_STRATEGY),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
-      arg(params.strategyType.toString(), t.UInt8),
+      arg(typeRaw.toString(), t.UInt8),
       arg(params.token, t.String),
       arg(toUFix64(params.amountPerExecution), t.UFix64),
       arg(params.intervalSeconds.toString(), t.UInt64),
@@ -298,7 +354,7 @@ export async function createStrategy(params: {
   return txId;
 }
 
-export async function cancelStrategy(strategyID: number): Promise<string> {
+export async function txCancelStrategy(strategyID: number): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(CANCEL_STRATEGY),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
@@ -310,7 +366,7 @@ export async function cancelStrategy(strategyID: number): Promise<string> {
   return txId;
 }
 
-export async function pauseStrategy(strategyID: number): Promise<string> {
+export async function txPauseStrategy(strategyID: number): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(PAUSE_STRATEGY),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
@@ -322,7 +378,7 @@ export async function pauseStrategy(strategyID: number): Promise<string> {
   return txId;
 }
 
-export async function resumeStrategy(strategyID: number): Promise<string> {
+export async function txResumeStrategy(strategyID: number): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(RESUME_STRATEGY),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
@@ -334,7 +390,7 @@ export async function resumeStrategy(strategyID: number): Promise<string> {
   return txId;
 }
 
-export async function emergencyStop(): Promise<string> {
+export async function txEmergencyStop(): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(EMERGENCY_STOP),
     limit: 100,
@@ -343,7 +399,7 @@ export async function emergencyStop(): Promise<string> {
   return txId;
 }
 
-export async function resumeAll(): Promise<string> {
+export async function txResumeAll(): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(RESUME_ALL),
     limit: 100,
@@ -353,33 +409,69 @@ export async function resumeAll(): Promise<string> {
 }
 
 // ──────────────────────────────────────────────
-// Public API — Scripts (read-only)
+// Public API — Scripts (read-only queries)
 // ──────────────────────────────────────────────
 
-export async function getVaultBalance(address: string): Promise<number> {
+export async function queryVaultBalance(address: string): Promise<number> {
   const result = await fcl.query({
     cadence: cdc(GET_VAULT_BALANCE),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
       arg(address, t.Address),
     ],
   });
-  return parseFloat(result);
+  return parseFloat(result) || 0;
 }
 
-export async function getStrategies(address: string): Promise<unknown[]> {
-  return await fcl.query({
+export interface OnChainStrategy {
+  id: string;
+  strategyType: { rawValue: string };
+  token: string;
+  amountPerExecution: string;
+  intervalSeconds: string;
+  maxMonthlySpend: string;
+  slippageTolerance: string;
+  createdAt: string;
+  description: string;
+  status: { rawValue: string };
+  nextExecution: string;
+  executionCount: string;
+  totalSpent: string;
+  monthlySpent: string;
+}
+
+export async function queryStrategies(address: string): Promise<OnChainStrategy[]> {
+  const result = await fcl.query({
     cadence: cdc(GET_STRATEGIES),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
       arg(address, t.Address),
     ],
   });
+  return result || [];
 }
 
-export async function getExecutionHistory(address: string): Promise<unknown[]> {
-  return await fcl.query({
+export interface OnChainExecution {
+  strategyID: string;
+  amount: string;
+  timestamp: string;
+  executionNumber: string;
+}
+
+export async function queryExecutionHistory(address: string): Promise<OnChainExecution[]> {
+  const result = await fcl.query({
     cadence: cdc(GET_EXECUTION_HISTORY),
     args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
       arg(address, t.Address),
     ],
   });
+  return result || [];
+}
+
+export async function queryIsEmergencyStopped(address: string): Promise<boolean> {
+  const result = await fcl.query({
+    cadence: cdc(IS_EMERGENCY_STOPPED),
+    args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
+      arg(address, t.Address),
+    ],
+  });
+  return result === true;
 }

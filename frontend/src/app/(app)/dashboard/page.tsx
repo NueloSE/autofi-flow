@@ -1,13 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { useAutoFiStore, AutomationRule, RuleType, TriggerType } from "@/store/useAutoFiStore";
 import { RuleTypeBadge } from "@/components/RuleTypeBadge";
 import { parseNaturalLanguage } from "@/lib/parse-rule";
+import {
+  txSetupAccount,
+  txDeposit,
+  txWithdraw,
+  txWithdrawTo,
+  txCreateStrategy,
+  txCancelStrategy,
+  queryVaultBalance,
+  queryStrategies,
+  queryExecutionHistory,
+  queryIsEmergencyStopped,
+  type OnChainStrategy,
+  type OnChainExecution,
+} from "@/lib/flow-transactions";
+import { parseFriendlyError } from "@/lib/parse-error";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Terminal,
-  Play,
   X,
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -18,14 +32,9 @@ import {
   TrendingUp,
   Zap,
   SlidersHorizontal,
+  Loader2,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
-
-function useMounted() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  return mounted;
-}
 
 const RULE_TYPES: { value: RuleType; label: string; trigger: TriggerType }[] = [
   { value: "DCA_INVEST", label: "DCA Invest", trigger: "TIME" },
@@ -42,19 +51,78 @@ const INTERVALS: { value: number; label: string }[] = [
   { value: 2592000, label: "Monthly" },
 ];
 
+// Map on-chain strategy → frontend AutomationRule
+const STRATEGY_TYPE_NAMES: Record<string, RuleType> = {
+  "0": "DCA_INVEST",
+  "1": "SAVINGS_TRANSFER",
+  "2": "SUBSCRIPTION_PAYMENT",
+  "3": "PRICE_DIP_BUY",
+  "4": "PROFIT_SELL",
+};
+
+function mapOnChainStrategy(s: OnChainStrategy): AutomationRule {
+  const statusRaw = s.status?.rawValue ?? "0";
+  const isActive = statusRaw === "0";
+  const isPaused = statusRaw === "1";
+  return {
+    id: s.id,
+    ruleType: STRATEGY_TYPE_NAMES[s.strategyType?.rawValue ?? "0"] || "DCA_INVEST",
+    triggerType: Number(s.strategyType?.rawValue ?? 0) >= 3 ? "PRICE" : "TIME",
+    token: s.token,
+    amount: parseFloat(s.amountPerExecution) || 0,
+    interval: Number(s.intervalSeconds) || 604800,
+    nextExecution: new Date(parseFloat(s.nextExecution) * 1000),
+    active: isActive,
+    status: isActive ? "active" : isPaused ? "paused" : "cancelled",
+    maxMonthlySpend: parseFloat(s.maxMonthlySpend) || 0,
+    slippageTolerance: parseFloat(s.slippageTolerance) || 0,
+    monthlySpent: parseFloat(s.monthlySpent) || 0,
+    createdAt: new Date(parseFloat(s.createdAt) * 1000),
+    executionCount: Number(s.executionCount) || 0,
+    totalSpent: parseFloat(s.totalSpent) || 0,
+    description: s.description,
+  };
+}
+
+function mapOnChainExecution(e: OnChainExecution) {
+  return {
+    id: `exec-${e.strategyID}-${e.executionNumber}`,
+    type: "rule_execution" as const,
+    amount: -(parseFloat(e.amount) || 0),
+    timestamp: new Date(parseFloat(e.timestamp) * 1000),
+    description: `Strategy #${e.strategyID} execution #${e.executionNumber}`,
+  };
+}
+
 export default function DashboardPage() {
-  const mounted = useMounted();
+  const mountedRef = useRef(false);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   const {
+    walletAddress,
+    isConnected,
     vaultBalance,
     rules,
     vaultHistory,
     allPaused,
-    addRule,
-    simulateExecution,
-    cancelRule,
-    deposit,
-    withdraw,
+    setVaultBalance,
+    setRules,
+    setVaultHistory,
+    addHistoryEntry,
+    setAllPaused,
   } = useAutoFiStore();
+
+  // Loading state for on-chain transactions
+  const [txLoading, setTxLoading] = useState(false);
+  const [txError, setTxError] = useState("");
 
   // Creation mode
   const [mode, setMode] = useState<"nlp" | "manual">("nlp");
@@ -76,11 +144,69 @@ export default function DashboardPage() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawTo, setWithdrawTo] = useState("");
   const [justCreated, setJustCreated] = useState(false);
+
+  // Fetch all on-chain data
+  const refreshOnChainData = useCallback(async () => {
+    if (!walletAddress) return;
+    try {
+      const [balance, strategies, executions, stopped] = await Promise.all([
+        queryVaultBalance(walletAddress),
+        queryStrategies(walletAddress),
+        queryExecutionHistory(walletAddress),
+        queryIsEmergencyStopped(walletAddress),
+      ]);
+      if (!mountedRef.current) return;
+      setVaultBalance(balance);
+      setRules(strategies.map(mapOnChainStrategy));
+      // Merge on-chain executions with local history entries
+      const onChainEntries = executions.map(mapOnChainExecution);
+      const onChainIds = new Set(onChainEntries.map((e) => e.id));
+      const { vaultHistory: currentHistory } = useAutoFiStore.getState();
+      const localEntries = currentHistory.filter((h) => !onChainIds.has(h.id) && h.type !== "rule_execution");
+      const merged = [...localEntries, ...onChainEntries].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+      setVaultHistory(merged);
+      setAllPaused(stopped);
+    } catch (err) {
+      console.error("Failed to fetch on-chain data:", err);
+    }
+  }, [walletAddress, setVaultBalance, setRules, setVaultHistory, setAllPaused]);
+
+  // Auto-setup account + fetch data when wallet connects
+  useEffect(() => {
+    if (!walletAddress) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await txSetupAccount();
+      } catch {
+        // vault may already exist
+      }
+      if (!cancelled) refreshOnChainData();
+    })();
+    return () => { cancelled = true; };
+  }, [walletAddress, refreshOnChainData]);
 
   const activeRules = rules.filter((r) => r.active);
   const totalInvested = rules.reduce((s, r) => s + r.totalSpent, 0);
   const totalExecutions = rules.reduce((s, r) => s + r.executionCount, 0);
+
+  // Wrapper for on-chain transactions
+  const sendTx = async (fn: () => Promise<unknown>) => {
+    setTxLoading(true);
+    setTxError("");
+    try {
+      await fn();
+      await refreshOnChainData();
+    } catch (err) {
+      console.error("Transaction failed:", err);
+      setTxError(parseFriendlyError(err));
+    }
+    setTxLoading(false);
+  };
 
   const handleCommand = () => {
     if (!commandInput.trim()) return;
@@ -94,34 +220,32 @@ export default function DashboardPage() {
     }
   };
 
-  const createFromParsed = () => {
-    if (!parsedRule) return;
-    addRule({
-      ruleType: parsedRule.ruleType!,
-      triggerType: parsedRule.triggerType!,
-      token: parsedRule.token!,
-      amount: parsedRule.amount!,
-      interval: parsedRule.interval,
-      nextExecution: parsedRule.nextExecution,
-      referencePrice: parsedRule.referencePrice,
-      priceChangePercent: parsedRule.priceChangePercent,
-      notifyBeforeExecution: false,
-      active: true,
-      status: "active",
-      maxMonthlySpend: 0,
-      slippageTolerance: 2,
-      description: parsedRule.description || "",
+  const createFromParsed = async () => {
+    if (!parsedRule || !isConnected) return;
+    const desc = parsedRule.description || "";
+    await sendTx(async () => {
+      await txCreateStrategy({
+        strategyType: parsedRule.ruleType!,
+        token: parsedRule.token!,
+        amountPerExecution: parsedRule.amount!,
+        intervalSeconds: parsedRule.interval || 604800,
+        maxMonthlySpend: 0,
+        slippageTolerance: 2,
+        description: desc,
+      });
+      addHistoryEntry({ type: "strategy_created", amount: 0, description: `Strategy created: ${desc}` });
     });
     setCommandInput("");
     setParsedRule(null);
     flashCreated();
   };
 
-  const createFromManual = () => {
+  const createFromManual = async () => {
+    if (!isConnected) return;
     const amount = parseFloat(manualAmount);
     if (!amount || amount <= 0) return;
     const selected = RULE_TYPES.find((r) => r.value === manualType)!;
-    const isPriceTrigger = selected.trigger === "PRICE";
+    const isPriceTrig = selected.trigger === "PRICE";
     const intervalLabel = INTERVALS.find((i) => i.value === manualInterval)?.label.toLowerCase() || "weekly";
 
     let description = "";
@@ -131,21 +255,17 @@ export default function DashboardPage() {
     else if (manualType === "PRICE_DIP_BUY") description = `Buy $${amount} of ${manualToken} when price drops ${manualPricePct}%`;
     else if (manualType === "PROFIT_SELL") description = `Sell $${amount} of ${manualToken} when price rises ${manualPricePct}%`;
 
-    addRule({
-      ruleType: manualType,
-      triggerType: selected.trigger,
-      token: manualToken,
-      amount,
-      interval: isPriceTrigger ? undefined : manualInterval,
-      nextExecution: isPriceTrigger ? undefined : new Date(Date.now() + manualInterval * 1000),
-      referencePrice: isPriceTrigger ? 1.0 : undefined,
-      priceChangePercent: isPriceTrigger ? parseFloat(manualPricePct) : undefined,
-      notifyBeforeExecution: false,
-      active: true,
-      status: "active",
-      maxMonthlySpend: 0,
-      slippageTolerance: 2,
-      description,
+    await sendTx(async () => {
+      await txCreateStrategy({
+        strategyType: manualType,
+        token: manualToken,
+        amountPerExecution: amount,
+        intervalSeconds: isPriceTrig ? 86400 : manualInterval,
+        maxMonthlySpend: 0,
+        slippageTolerance: 2,
+        description,
+      });
+      addHistoryEntry({ type: "strategy_created", amount: 0, description: `Strategy created: ${description}` });
     });
     flashCreated();
   };
@@ -155,26 +275,57 @@ export default function DashboardPage() {
     setTimeout(() => setJustCreated(false), 2000);
   };
 
-  const handleDeposit = (e: React.FormEvent) => {
+  const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(depositAmount);
-    if (!amt || amt <= 0) return;
-    deposit(amt);
+    if (!amt || amt <= 0 || !isConnected) return;
+    await sendTx(async () => {
+      await txDeposit(amt);
+      addHistoryEntry({ type: "deposit", amount: amt, description: `Deposited ${amt} FLOW` });
+    });
     setDepositAmount("");
     setShowDeposit(false);
   };
 
-  const handleWithdraw = (e: React.FormEvent) => {
+  const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(withdrawAmount);
-    if (!amt || amt <= 0 || amt > vaultBalance) return;
-    withdraw(amt);
+    if (!amt || amt <= 0 || amt > vaultBalance || !isConnected) return;
+    const recipient = withdrawTo.trim();
+    if (recipient && recipient !== walletAddress) {
+      await sendTx(async () => {
+        await txWithdrawTo(amt, recipient);
+        const shortAddr = `${recipient.slice(0, 6)}...${recipient.slice(-4)}`;
+        addHistoryEntry({ type: "withdraw_to", amount: -amt, description: `Withdrew ${amt} FLOW to ${shortAddr}` });
+      });
+    } else {
+      await sendTx(async () => {
+        await txWithdraw(amt);
+        addHistoryEntry({ type: "withdraw", amount: -amt, description: `Withdrew ${amt} FLOW` });
+      });
+    }
     setWithdrawAmount("");
+    setWithdrawTo("");
     setShowWithdraw(false);
   };
 
   const selectedRuleType = RULE_TYPES.find((r) => r.value === manualType)!;
   const isPriceTrigger = selectedRuleType.trigger === "PRICE";
+
+  // Not connected state
+  if (!isConnected) {
+    return (
+      <div className="p-6 lg:p-8 max-w-6xl mx-auto">
+        <div className="border border-dashed border-zinc-800 rounded-lg px-6 py-24 text-center">
+          <Wallet size={32} className="text-zinc-700 mx-auto mb-4" />
+          <p className="text-lg font-mono text-zinc-400 mb-2">Connect your wallet</p>
+          <p className="text-sm text-zinc-600">
+            Connect a Flow wallet to start creating strategies
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto">
@@ -192,6 +343,37 @@ export default function DashboardPage() {
         )}
       </AnimatePresence>
 
+      {/* Transaction loading */}
+      <AnimatePresence>
+        {txLoading && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-5 px-4 py-3 rounded-md border border-amber-500/20 bg-amber-500/5 text-amber-500 text-sm font-mono flex items-center gap-2"
+          >
+            <Loader2 size={14} className="animate-spin" /> Sending transaction to Flow...
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Error banner */}
+      <AnimatePresence>
+        {txError && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-5 px-4 py-3 rounded-md border border-red-500/30 bg-red-500/5 text-red-400 text-sm font-mono flex items-center justify-between"
+          >
+            <span>Error: {txError}</span>
+            <button onClick={() => setTxError("")} className="text-red-500 hover:text-red-300 cursor-pointer bg-transparent border-0">
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Success flash */}
       <AnimatePresence>
         {justCreated && (
@@ -201,7 +383,7 @@ export default function DashboardPage() {
             exit={{ opacity: 0, y: -10 }}
             className="mb-5 px-4 py-3 rounded-md border border-amber-500/30 bg-amber-500/5 text-amber-500 text-sm font-mono flex items-center gap-2"
           >
-            <Zap size={14} /> Strategy created successfully
+            <Zap size={14} /> Strategy created on-chain successfully
           </motion.div>
         )}
       </AnimatePresence>
@@ -264,7 +446,8 @@ export default function DashboardPage() {
                 />
                 <button
                   onClick={handleCommand}
-                  className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded text-amber-500 text-xs font-mono font-medium cursor-pointer hover:bg-amber-500/20 transition-colors duration-150 flex items-center gap-1.5 shrink-0"
+                  disabled={txLoading}
+                  className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded text-amber-500 text-xs font-mono font-medium cursor-pointer hover:bg-amber-500/20 transition-colors duration-150 flex items-center gap-1.5 shrink-0 disabled:opacity-50"
                 >
                   Parse <ChevronRight size={12} />
                 </button>
@@ -286,7 +469,7 @@ export default function DashboardPage() {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="px-4 py-3 border-t border-amber-500/10 bg-amber-500/[0.03] flex items-center justify-between"
+                    className="px-4 py-3 border-t border-amber-500/10 bg-amber-500/3 flex items-center justify-between"
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] font-mono text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">PARSED</span>
@@ -295,9 +478,10 @@ export default function DashboardPage() {
                     </div>
                     <button
                       onClick={createFromParsed}
-                      className="px-4 py-1.5 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150"
+                      disabled={txLoading}
+                      className="px-4 py-1.5 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50"
                     >
-                      CREATE
+                      {txLoading ? "SENDING..." : "CREATE"}
                     </button>
                   </motion.div>
                 )}
@@ -308,7 +492,6 @@ export default function DashboardPage() {
           {/* Manual Mode */}
           {mode === "manual" && (
             <div className="px-4 py-4">
-              {/* Rule type selector */}
               <div className="flex flex-wrap gap-1.5 mb-4">
                 {RULE_TYPES.map((rt) => (
                   <button
@@ -325,9 +508,7 @@ export default function DashboardPage() {
                 ))}
               </div>
 
-              {/* Form fields */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                {/* Token */}
                 <div>
                   <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Token</label>
                   <select
@@ -340,7 +521,6 @@ export default function DashboardPage() {
                   </select>
                 </div>
 
-                {/* Amount */}
                 <div>
                   <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Amount ($)</label>
                   <input
@@ -354,7 +534,6 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                {/* Interval or Price % */}
                 {isPriceTrigger ? (
                   <div>
                     <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
@@ -385,13 +564,13 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {/* Create button */}
                 <div className="flex items-end">
                   <button
                     onClick={createFromManual}
-                    className="w-full px-4 py-2 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150"
+                    disabled={txLoading}
+                    className="w-full px-4 py-2 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50"
                   >
-                    CREATE
+                    {txLoading ? "SENDING..." : "CREATE"}
                   </button>
                 </div>
               </div>
@@ -410,7 +589,7 @@ export default function DashboardPage() {
         <StatCard
           icon={<Wallet size={16} />}
           label="Vault Balance"
-          value={`$${vaultBalance.toFixed(2)}`}
+          value={`${vaultBalance.toFixed(2)} FLOW`}
           highlight
           actions={
             <div className="flex gap-1 mt-3">
@@ -444,7 +623,7 @@ export default function DashboardPage() {
         <StatCard
           icon={<TrendingUp size={16} />}
           label="Total Invested"
-          value={`$${totalInvested.toFixed(2)}`}
+          value={`${totalInvested.toFixed(2)} FLOW`}
           sub="across strategies"
         />
       </motion.div>
@@ -459,44 +638,68 @@ export default function DashboardPage() {
             onSubmit={handleDeposit}
             className="mb-4 flex items-center gap-2 px-4 py-3 rounded-md border border-zinc-800 bg-zinc-900/50"
           >
-            <span className="text-xs font-mono text-zinc-500">DEPOSIT $</span>
-            <input
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
-              placeholder="100.00"
-              className="flex-1 bg-transparent border-none outline-none text-sm font-mono text-zinc-100 placeholder-zinc-600"
-              autoFocus
-            />
-            {[50, 100, 250, 500].map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => setDepositAmount(q.toString())}
-                className="px-2 py-1 text-[10px] font-mono text-zinc-500 border border-zinc-800 rounded cursor-pointer hover:text-amber-500 hover:border-amber-500/30 bg-transparent transition-colors duration-150"
-              >
-                ${q}
-              </button>
-            ))}
+              <span className="text-xs font-mono text-zinc-500">DEPOSIT FLOW</span>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(e.target.value)}
+                placeholder="10.0"
+                className="flex-1 bg-transparent border-none outline-none text-sm font-mono text-zinc-100 placeholder-zinc-600"
+                autoFocus
+              />
+              {[1, 5, 10, 50].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setDepositAmount(q.toString())}
+                  className="px-2 py-1 text-[10px] font-mono text-zinc-500 border border-zinc-800 rounded cursor-pointer hover:text-amber-500 hover:border-amber-500/30 bg-transparent transition-colors duration-150"
+                >
+                  {q}
+                </button>
+              ))}
             <button
               type="submit"
-              className="px-3 py-1.5 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150"
+              disabled={txLoading}
+              className="px-3 py-1.5 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50"
             >
               CONFIRM
             </button>
           </motion.form>
         )}
         {showWithdraw && (
-          <motion.form
+          <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            onSubmit={handleWithdraw}
-            className="mb-4 flex items-center gap-2 px-4 py-3 rounded-md border border-zinc-800 bg-zinc-900/50"
+            className="mb-4 rounded-md border border-zinc-800 bg-zinc-900/50 overflow-hidden"
           >
-            <span className="text-xs font-mono text-zinc-500">WITHDRAW $</span>
+            {/* Recipient address */}
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/60 bg-zinc-900/40">
+              <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider shrink-0">Send to</span>
+              <input
+                type="text"
+                value={withdrawTo}
+                onChange={(e) => setWithdrawTo(e.target.value)}
+                placeholder={walletAddress || "0x... (leave empty for your wallet)"}
+                className="flex-1 bg-transparent border-none outline-none text-xs font-mono text-zinc-400 placeholder-zinc-700"
+              />
+              {withdrawTo && (
+                <button
+                  type="button"
+                  onClick={() => setWithdrawTo("")}
+                  className="text-zinc-600 hover:text-zinc-400 cursor-pointer bg-transparent border-0 p-0.5"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+            <form
+              onSubmit={handleWithdraw}
+              className="flex items-center gap-2 px-4 py-3"
+            >
+              <span className="text-xs font-mono text-zinc-500">WITHDRAW FLOW</span>
             <input
               type="number"
               min="0.01"
@@ -504,7 +707,7 @@ export default function DashboardPage() {
               max={vaultBalance}
               value={withdrawAmount}
               onChange={(e) => setWithdrawAmount(e.target.value)}
-              placeholder="50.00"
+              placeholder="5.0"
               className="flex-1 bg-transparent border-none outline-none text-sm font-mono text-zinc-100 placeholder-zinc-600"
               autoFocus
             />
@@ -515,13 +718,15 @@ export default function DashboardPage() {
             >
               MAX
             </button>
-            <button
-              type="submit"
-              className="px-3 py-1.5 bg-zinc-700 text-zinc-100 rounded text-xs font-mono font-bold cursor-pointer hover:bg-zinc-600 transition-colors duration-150"
-            >
-              CONFIRM
-            </button>
-          </motion.form>
+              <button
+                type="submit"
+                disabled={txLoading}
+                className="px-3 py-1.5 bg-zinc-700 text-zinc-100 rounded text-xs font-mono font-bold cursor-pointer hover:bg-zinc-600 transition-colors duration-150 disabled:opacity-50"
+              >
+                CONFIRM
+              </button>
+            </form>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -549,7 +754,7 @@ export default function DashboardPage() {
               <Terminal size={24} className="text-zinc-700 mx-auto mb-3" />
               <p className="text-sm font-mono text-zinc-500 mb-1">No strategies yet</p>
               <p className="text-xs text-zinc-600">
-                Use the command bar above to create your first strategy
+                Deposit FLOW and create your first strategy above
               </p>
             </div>
           ) : (
@@ -565,8 +770,12 @@ export default function DashboardPage() {
                     rule={rule}
                     mounted={mounted}
                     isLast={i === rules.length - 1}
-                    onExecute={() => simulateExecution(rule.id)}
-                    onCancel={() => cancelRule(rule.id)}
+                    onCancel={async () => {
+                      await sendTx(async () => {
+                        await txCancelStrategy(Number(rule.id));
+                        addHistoryEntry({ type: "strategy_cancelled", amount: 0, description: `Cancelled: ${rule.description}` });
+                      });
+                    }}
                   />
                 </motion.div>
               ))}
@@ -582,7 +791,7 @@ export default function DashboardPage() {
         >
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-mono text-zinc-500 uppercase tracking-wider">
-              Activity Log
+              Activity
             </span>
           </div>
 
@@ -599,30 +808,40 @@ export default function DashboardPage() {
                 <p className="text-xs font-mono text-zinc-700">No activity yet</p>
               </div>
             ) : (
-              vaultHistory.slice(0, 10).map((h, i) => (
-                <div
-                  key={h.id}
-                  className={`flex items-center justify-between px-3 py-2.5
-                    ${i < Math.min(vaultHistory.length, 10) - 1 ? "border-b border-zinc-800/30" : ""}`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className={`w-1 h-1 rounded-full shrink-0 ${h.amount > 0 ? "bg-amber-500" : "bg-zinc-600"}`} />
-                    <div className="min-w-0">
-                      <div className="text-xs text-zinc-400 truncate">{h.description}</div>
-                      <div className="text-[10px] font-mono text-zinc-700">
-                        {mounted ? format(new Date(h.timestamp), "MM/dd HH:mm") : "--"}
+              vaultHistory.slice(0, 15).map((h, i) => {
+                const dotColor =
+                  h.type === "deposit" ? "bg-green-500"
+                  : h.type === "withdraw" || h.type === "withdraw_to" ? "bg-red-400"
+                  : h.type === "strategy_created" ? "bg-amber-500"
+                  : h.type === "strategy_cancelled" ? "bg-zinc-500"
+                  : h.type === "emergency_stop" ? "bg-red-500"
+                  : h.type === "resume_all" ? "bg-blue-400"
+                  : "bg-amber-500";
+                const amountColor =
+                  h.amount > 0 ? "text-green-500" : h.amount < 0 ? "text-red-400" : "text-zinc-600";
+                return (
+                  <div
+                    key={h.id}
+                    className={`flex items-center justify-between px-3 py-2.5
+                      ${i < Math.min(vaultHistory.length, 15) - 1 ? "border-b border-zinc-800/30" : ""}`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+                      <div className="min-w-0">
+                        <div className="text-xs text-zinc-400 truncate">{h.description}</div>
+                        <div className="text-[10px] font-mono text-zinc-700">
+                          {mounted ? format(new Date(h.timestamp), "MM/dd HH:mm") : "--"}
+                        </div>
                       </div>
                     </div>
+                    {h.amount !== 0 && (
+                      <span className={`text-xs font-mono font-semibold shrink-0 ${amountColor}`}>
+                        {h.amount > 0 ? "+" : ""}{h.amount.toFixed(2)} FLOW
+                      </span>
+                    )}
                   </div>
-                  <span
-                    className={`text-xs font-mono font-semibold shrink-0 ${
-                      h.amount > 0 ? "text-amber-500" : "text-zinc-500"
-                    }`}
-                  >
-                    {h.amount > 0 ? "+" : ""}${Math.abs(h.amount).toFixed(0)}
-                  </span>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </motion.div>
@@ -649,7 +868,7 @@ function StatCard({
   return (
     <div className={`rounded-lg px-4 py-4 border transition-colors duration-200
       ${highlight
-        ? "border-amber-500/20 bg-amber-500/[0.03]"
+        ? "border-amber-500/20 bg-amber-500/3"
         : "border-zinc-800/60 bg-zinc-900/40 hover:border-zinc-700"
       }`}
     >
@@ -678,13 +897,11 @@ function StrategyRow({
   rule,
   mounted,
   isLast,
-  onExecute,
   onCancel,
 }: {
   rule: AutomationRule;
   mounted: boolean;
   isLast: boolean;
-  onExecute: () => void;
   onCancel: () => void;
 }) {
   const statusColor = rule.active
@@ -705,7 +922,7 @@ function StrategyRow({
         {rule.description}
       </span>
       <span className="text-xs font-mono text-zinc-500 shrink-0 tabular-nums">
-        ${rule.amount}
+        {rule.amount} FLOW
       </span>
       <div className="w-px h-3 bg-zinc-800 shrink-0" />
       <span className="text-[10px] font-mono text-zinc-600 shrink-0 tabular-nums">
@@ -723,13 +940,6 @@ function StrategyRow({
       )}
       {rule.active && (
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-          <button
-            onClick={onExecute}
-            title="Execute now"
-            className="p-1.5 rounded text-amber-500/50 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer bg-transparent border-0 transition-colors duration-150"
-          >
-            <Play size={12} />
-          </button>
           <button
             onClick={onCancel}
             title="Cancel"
