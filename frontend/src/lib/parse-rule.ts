@@ -4,7 +4,10 @@ export function parseNaturalLanguage(input: string): Partial<AutomationRule> | n
   const lower = input.toLowerCase().trim();
 
   // ── Token detection ──
-  const token = lower.includes("usdc") ? "USDC" : "FLOW";
+  const token = lower.includes("usdc") ? "USDC"
+    : lower.includes("stflow") ? "stFLOW"
+    : lower.includes("dust") ? "DUST"
+    : "FLOW";
 
   // ── Amount detection ──
   // Matches: "$5", "$50.5", "5 usdc", "5 flow", "5 of", or bare number before token
@@ -13,7 +16,7 @@ export function parseNaturalLanguage(input: string): Partial<AutomationRule> | n
   if (dollarMatch) {
     amount = parseFloat(dollarMatch[1]);
   } else {
-    const tokenAmountMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:usdc|flow|of\b)/);
+    const tokenAmountMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:usdc|flow|stflow|dust|of\b)/);
     if (tokenAmountMatch) {
       amount = parseFloat(tokenAmountMatch[1]);
     } else {

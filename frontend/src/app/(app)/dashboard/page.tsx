@@ -5,6 +5,7 @@ import { useAutoFiStore, AutomationRule, VaultHistory, RuleType, TriggerType } f
 import { RuleTypeBadge } from "@/components/RuleTypeBadge";
 import { TokenIcon } from "@/components/TokenIcon";
 import { parseNaturalLanguage } from "@/lib/parse-rule";
+import { getFlowUsdPrice, formatUsd } from "@/lib/flow-prices";
 import {
   txSetupAccount,
   txDeposit,
@@ -143,6 +144,14 @@ export default function DashboardPage() {
   const [withdrawTo, setWithdrawTo] = useState("");
   const [txSuccess, setTxSuccess] = useState("");
   const [showActivityModal, setShowActivityModal] = useState(false);
+
+  // FLOW price
+  const [flowPrice, setFlowPrice] = useState(0);
+  useEffect(() => {
+    getFlowUsdPrice().then(setFlowPrice);
+    const iv = setInterval(() => getFlowUsdPrice().then(setFlowPrice), 60_000);
+    return () => clearInterval(iv);
+  }, []);
 
   // Fetch all on-chain data
   const refreshOnChainData = useCallback(async () => {
@@ -555,6 +564,8 @@ export default function DashboardPage() {
                     >
                       <option value="FLOW">FLOW</option>
                       <option value="USDC">USDC</option>
+                      <option value="stFLOW">stFLOW</option>
+                      <option value="DUST">DUST</option>
                     </select>
                   </div>
                 </div>
@@ -636,6 +647,7 @@ export default function DashboardPage() {
           label="Vault Balance"
           value={vaultBalance.toFixed(2)}
           valueSuffix={<span className="inline-flex items-center gap-1 ml-1.5"><TokenIcon token="FLOW" size={18} /><span className="text-sm font-normal text-zinc-500">FLOW</span></span>}
+          sub={flowPrice > 0 ? `≈ ${formatUsd(vaultBalance * flowPrice)}` : undefined}
           highlight
           actions={
             <div className="flex gap-1 mt-3">
@@ -671,7 +683,7 @@ export default function DashboardPage() {
           label="Total Invested"
           value={totalInvested.toFixed(2)}
           valueSuffix={<span className="inline-flex items-center gap-1 ml-1.5"><TokenIcon token="FLOW" size={18} /><span className="text-sm font-normal text-zinc-500">FLOW</span></span>}
-          sub="across strategies"
+          sub={flowPrice > 0 ? `≈ ${formatUsd(totalInvested * flowPrice)} across strategies` : "across strategies"}
         />
       </motion.div>
 
@@ -817,6 +829,7 @@ export default function DashboardPage() {
                     rule={rule}
                     mounted={mounted}
                     isLast={i === rules.length - 1}
+                    flowPrice={flowPrice}
                     onExecute={async () => {
                       const isReady = rule.nextExecution && new Date(rule.nextExecution) <= new Date();
                       if (!isReady) {
@@ -1030,12 +1043,14 @@ function StrategyRow({
   rule,
   mounted,
   isLast,
+  flowPrice,
   onExecute,
   onCancel,
 }: {
   rule: AutomationRule;
   mounted: boolean;
   isLast: boolean;
+  flowPrice: number;
   onExecute: () => void;
   onCancel: () => void;
 }) {
@@ -1074,6 +1089,9 @@ function StrategyRow({
       <div className="w-px h-3 bg-zinc-800 shrink-0" />
       <span className="text-[10px] font-mono text-zinc-600 shrink-0 tabular-nums">
         {rule.executionCount}x run
+        {flowPrice > 0 && rule.totalSpent > 0 && (
+          <span className="text-zinc-700"> · {formatUsd(rule.totalSpent * flowPrice)}</span>
+        )}
       </span>
       {rule.nextExecution && rule.active && (
         <>

@@ -35,6 +35,23 @@
 				"testnet": "7e60df042a9c0868"
 			}
 		},
+		"FlowTransactionScheduler": {
+			"source": "testnet://8c5303eaa26202d6.FlowTransactionScheduler",
+			"hash": "",
+			"aliases": {
+				"emulator": "f8d6e0586b0a20c7",
+				"mainnet": "e467b9dd11fa00df",
+				"testnet": "8c5303eaa26202d6"
+			}
+		},
+		"FlowTransactionSchedulerUtils": {
+			"source": "testnet://8c5303eaa26202d6.FlowTransactionSchedulerUtils",
+			"hash": "",
+			"aliases": {
+				"mainnet": "e467b9dd11fa00df",
+				"testnet": "8c5303eaa26202d6"
+			}
+		},
 		"FungibleToken": {
 			"source": "mainnet://f233dcee88fe0abe.FungibleToken",
 			"hash": "4b74edfe7d7ddfa70b703c14aa731a0b2e7ce016ce54d998bfd861ada4d240f6",
@@ -75,6 +92,14 @@
 				"testnet": "631e88ae7f1d7c20"
 			}
 		},
+		"SwapRouter": {
+			"source": "mainnet://a6850776a94e6551.SwapRouter",
+			"hash": "",
+			"aliases": {
+				"mainnet": "a6850776a94e6551",
+				"testnet": "2f8af5ed05bbde0d"
+			}
+		},
 		"ViewResolver": {
 			"source": "mainnet://1d7e57aa55817448.ViewResolver",
 			"hash": "374a1994046bac9f6228b4843cb32393ef40554df9bd9907a702d098a2987bde",
@@ -83,27 +108,6 @@
 				"emulator": "f8d6e0586b0a20c7",
 				"mainnet": "1d7e57aa55817448",
 				"testnet": "631e88ae7f1d7c20"
-			}
-		},
-		"FlowTransactionScheduler": {
-			"source": "testnet://8c5303eaa26202d6.FlowTransactionScheduler",
-			"aliases": {
-				"testnet": "8c5303eaa26202d6",
-				"mainnet": "e467b9dd11fa00df"
-			}
-		},
-		"FlowTransactionSchedulerUtils": {
-			"source": "testnet://8c5303eaa26202d6.FlowTransactionSchedulerUtils",
-			"aliases": {
-				"testnet": "8c5303eaa26202d6",
-				"mainnet": "e467b9dd11fa00df"
-			}
-		},
-		"SwapRouter": {
-			"source": "mainnet://a6850776a94e6551.SwapRouter",
-			"aliases": {
-				"mainnet": "a6850776a94e6551",
-				"testnet": "2f8af5ed05bbde0d"
 			}
 		}
 	},
@@ -117,19 +121,18 @@
 			"address": "f8d6e0586b0a20c7",
 			"key": "2eae2f31cb5b756151fa11d82949c634b8f28796a40d16a534e63a869f9e3b6e"
 		},
-		"testnet-account": {
-			"address": "0x902e1baab3b18cac",
-			"key": "0c7441592a07b6cc3c07a2814ee073499a858ceb192979010a36ccb869c5cbb1"
-		},
 		"mainnet-account": {
-			"address": "0x3002afb10b4ba66d",
+			"address": "3002afb10b4ba66d",
 			"key": {
 				"type": "hex",
-				"index": 0,
 				"signatureAlgorithm": "ECDSA_secp256k1",
 				"hashAlgorithm": "SHA2_256",
 				"privateKey": "bcefa02e815c9eb0bf85a69d2b517279228cc9f54724e68c88c2187614705d4e"
 			}
+		},
+		"testnet-account": {
+			"address": "902e1baab3b18cac",
+			"key": "0c7441592a07b6cc3c07a2814ee073499a858ceb192979010a36ccb869c5cbb1"
 		}
 	},
 	"deployments": {
@@ -138,14 +141,14 @@
 				"AutoFi"
 			]
 		},
-		"testnet": {
-			"testnet-account": [
+		"mainnet": {
+			"mainnet-account": [
 				"AutoFi",
 				"AutoFiScheduler"
 			]
 		},
-		"mainnet": {
-			"mainnet-account": [
+		"testnet": {
+			"testnet-account": [
 				"AutoFi",
 				"AutoFiScheduler"
 			]

@@ -56,7 +56,7 @@ export default function LandingPage() {
             AutoFi
           </span>
           <span className="text-[9px] font-mono font-medium text-amber-500 border border-amber-500/30 px-1.5 py-0.5 rounded uppercase tracking-wider">
-            testnet
+            mainnet
           </span>
         </div>
         <Link

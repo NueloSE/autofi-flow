@@ -87,7 +87,7 @@ export default function WalletButton() {
             {copied ? "Copied" : "Copy Address"}
           </button>
           <a
-            href={`https://testnet.flowscan.io/account/${walletAddress}`}
+            href={`https://flowscan.io/account/${walletAddress}`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 no-underline border-b border-zinc-800"

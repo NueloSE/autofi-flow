@@ -3,6 +3,8 @@ import Image from "next/image";
 const TOKEN_ICONS: Record<string, string> = {
   FLOW: "/flow-logo.svg",
   USDC: "/usdc-logo.svg",
+  STFLOW: "/stflow-logo.svg",
+  DUST: "/dust-logo.png",
 };
 
 export function TokenIcon({

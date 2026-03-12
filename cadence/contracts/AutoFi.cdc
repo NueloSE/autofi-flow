@@ -502,6 +502,8 @@ access(all) contract AutoFi {
                 return [flowKey, "A.f1ab99c82dee3526.USDCFlow"]
             case "stFLOW":
                 return [flowKey, "A.d6f80565193ad727.stFlowToken"]
+            case "DUST":
+                return [flowKey, "A.921ea449dffec68a.FlovatarDustToken"]
             default:
                 return nil
         }
@@ -515,6 +517,8 @@ access(all) contract AutoFi {
                 return /public/usdcFlowReceiver
             case "stFLOW":
                 return /public/stFlowTokenReceiver
+            case "DUST":
+                return /public/FlovatarDustTokenReceiver
             default:
                 return nil
         }
