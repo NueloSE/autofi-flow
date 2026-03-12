@@ -75,95 +75,64 @@ async function sealWithTimeout(txId: string): Promise<void> {
 // Transaction templates
 // ──────────────────────────────────────────────
 
+// Single combined setup transaction — one wallet approval for everything
 const SETUP_ACCOUNT = `
 import AutoFi from __AUTOFI__
-
-transaction {
-    prepare(signer: auth(Storage, Capabilities) &Account) {
-        if signer.storage.borrow<&AutoFi.Vault>(from: AutoFi.VaultStoragePath) != nil {
-            return
-        }
-        let vault <- AutoFi.createVault()
-        signer.storage.save(<-vault, to: AutoFi.VaultStoragePath)
-        let cap = signer.capabilities.storage.issue<&{AutoFi.VaultPublic}>(AutoFi.VaultStoragePath)
-        signer.capabilities.publish(cap, at: AutoFi.VaultPublicPath)
-    }
-}
-`;
-
-const SETUP_USDC_VAULT = `
 import FungibleToken from __FUNGIBLE_TOKEN__
 import USDCFlow from __USDC_FLOW__
+import stFlowToken from __STFLOW_TOKEN__
+import FlovatarDustToken from __DUST_TOKEN__
 
 transaction {
     prepare(signer: auth(Storage, Capabilities) &Account) {
+        // ── AutoFi Vault ──
+        if signer.storage.borrow<&AutoFi.Vault>(from: AutoFi.VaultStoragePath) == nil {
+            let vault <- AutoFi.createVault()
+            signer.storage.save(<-vault, to: AutoFi.VaultStoragePath)
+            let cap = signer.capabilities.storage.issue<&{AutoFi.VaultPublic}>(AutoFi.VaultStoragePath)
+            signer.capabilities.publish(cap, at: AutoFi.VaultPublicPath)
+        }
+
+        // ── USDC Vault ──
         if signer.storage.borrow<&USDCFlow.Vault>(from: /storage/usdcFlowVault) == nil {
             let usdcVault <- USDCFlow.createEmptyVault(vaultType: Type<@USDCFlow.Vault>())
             signer.storage.save(<-usdcVault, to: /storage/usdcFlowVault)
         }
         if signer.capabilities.borrow<&{FungibleToken.Receiver}>(/public/usdcFlowReceiver) == nil {
-            let receiverCap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(
-                /storage/usdcFlowVault
-            )
-            signer.capabilities.publish(receiverCap, at: /public/usdcFlowReceiver)
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(/storage/usdcFlowVault)
+            signer.capabilities.publish(cap, at: /public/usdcFlowReceiver)
         }
         if signer.capabilities.borrow<&{FungibleToken.Balance}>(/public/usdcFlowBalance) == nil {
-            let balanceCap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(
-                /storage/usdcFlowVault
-            )
-            signer.capabilities.publish(balanceCap, at: /public/usdcFlowBalance)
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(/storage/usdcFlowVault)
+            signer.capabilities.publish(cap, at: /public/usdcFlowBalance)
         }
-    }
-}
-`;
 
-const SETUP_STFLOW_VAULT = `
-import FungibleToken from __FUNGIBLE_TOKEN__
-import stFlowToken from __STFLOW_TOKEN__
-
-transaction {
-    prepare(signer: auth(Storage, Capabilities) &Account) {
+        // ── stFLOW Vault ──
         if signer.storage.borrow<&stFlowToken.Vault>(from: /storage/stFlowTokenVault) == nil {
             let vault <- stFlowToken.createEmptyVault(vaultType: Type<@stFlowToken.Vault>())
             signer.storage.save(<-vault, to: /storage/stFlowTokenVault)
         }
         if signer.capabilities.borrow<&{FungibleToken.Receiver}>(/public/stFlowTokenReceiver) == nil {
-            let receiverCap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(
-                /storage/stFlowTokenVault
-            )
-            signer.capabilities.publish(receiverCap, at: /public/stFlowTokenReceiver)
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(/storage/stFlowTokenVault)
+            signer.capabilities.publish(cap, at: /public/stFlowTokenReceiver)
         }
         if signer.capabilities.borrow<&{FungibleToken.Balance}>(/public/stFlowTokenBalance) == nil {
-            let balanceCap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(
-                /storage/stFlowTokenVault
-            )
-            signer.capabilities.publish(balanceCap, at: /public/stFlowTokenBalance)
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(/storage/stFlowTokenVault)
+            signer.capabilities.publish(cap, at: /public/stFlowTokenBalance)
         }
-    }
-}
-`;
 
-const SETUP_DUST_VAULT = `
-import FungibleToken from __FUNGIBLE_TOKEN__
-import FlovatarDustToken from __DUST_TOKEN__
-
-transaction {
-    prepare(signer: auth(Storage, Capabilities) &Account) {
+        // ── DUST Vault ──
         if signer.storage.borrow<&FlovatarDustToken.Vault>(from: /storage/FlovatarDustTokenVault) == nil {
             let vault <- FlovatarDustToken.createEmptyVault(vaultType: Type<@FlovatarDustToken.Vault>())
             signer.storage.save(<-vault, to: /storage/FlovatarDustTokenVault)
         }
         if signer.capabilities.borrow<&{FungibleToken.Receiver}>(/public/FlovatarDustTokenReceiver) == nil {
-            let receiverCap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(
-                /storage/FlovatarDustTokenVault
-            )
-            signer.capabilities.publish(receiverCap, at: /public/FlovatarDustTokenReceiver)
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(/storage/FlovatarDustTokenVault)
+            signer.capabilities.publish(cap, at: /public/FlovatarDustTokenReceiver)
         }
         if signer.capabilities.borrow<&{FungibleToken.Balance}>(/public/FlovatarDustTokenBalance) == nil {
-            let balanceCap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(
-                /storage/FlovatarDustTokenVault
-            )
-            signer.capabilities.publish(balanceCap, at: /public/FlovatarDustTokenBalance)
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(/storage/FlovatarDustTokenVault)
+            signer.capabilities.publish(cap, at: /public/FlovatarDustTokenBalance)
         }
     }
 }
@@ -532,21 +501,9 @@ const STRATEGY_TYPE_MAP: Record<string, number> = {
 export async function txSetupAccount(): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(SETUP_ACCOUNT),
-    limit: 100,
+    limit: 300,
   });
   await sealWithTimeout(txId);
-
-  // Best-effort: set up token vaults for receiving swaps
-  const optionalVaults = [SETUP_USDC_VAULT, SETUP_STFLOW_VAULT, SETUP_DUST_VAULT];
-  for (const vaultCdc of optionalVaults) {
-    try {
-      const vTxId = await fcl.mutate({ cadence: cdc(vaultCdc), limit: 100 });
-      await sealWithTimeout(vTxId);
-    } catch {
-      // Optional — vault may already exist or token contract unavailable
-    }
-  }
-
   return txId;
 }
 

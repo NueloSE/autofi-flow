@@ -178,20 +178,28 @@ export default function DashboardPage() {
     }
   }, [walletAddress, setVaultBalance, setRules, setVaultHistory, setAllPaused]);
 
-  // Auto-setup account + fetch data when wallet connects
+  // Auto-setup account once per session (survives page navigation)
   useEffect(() => {
     if (!walletAddress) return;
+    const key = `autofi_setup_${walletAddress}`;
+    if (sessionStorage.getItem(key)) {
+      refreshOnChainData();
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
         await txSetupAccount();
+        sessionStorage.setItem(key, "1");
       } catch {
-        // vault may already exist
+        // vault may already exist — still mark as done so we don't re-prompt
+        sessionStorage.setItem(key, "1");
       }
       if (!cancelled) refreshOnChainData();
     })();
     return () => { cancelled = true; };
-  }, [walletAddress, refreshOnChainData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletAddress]);
 
   // Auto-poll on-chain data every 15s so scheduled executions appear without manual refresh
   useEffect(() => {
