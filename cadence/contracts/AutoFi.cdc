@@ -400,10 +400,24 @@ access(all) contract AutoFi {
                 return
             }
 
-            // Execute: deduct funds
-            // In production: this would withdraw → swap via IncrementFi → deposit target token
-            // For MVP: we deduct from vault to record the execution
+            // Execute: deduct funds from AutoFi vault
+            // In production: this would swap via IncrementFi and deposit the target token
+            // For MVP: we withdraw FLOW from the vault back to the user's main wallet
             let spent = strategy.amountPerExecution
+            let withdrawn <- self.flowVault.withdraw(amount: spent)
+
+            // Deposit back to user's main FLOW wallet
+            let ownerAccount = getAccount(self.owner!.address)
+            let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+                /public/flowTokenReceiver
+            )
+            if receiverRef != nil {
+                receiverRef!.deposit(from: <-withdrawn)
+            } else {
+                // Fallback: if receiver not available, re-deposit to vault
+                self.flowVault.deposit(from: <-withdrawn)
+            }
+
             self.strategies[id]!.recordExecution(amount: spent, timestamp: now)
 
             // Log execution
