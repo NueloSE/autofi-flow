@@ -10,6 +10,7 @@ import {
   txWithdraw,
   txWithdrawTo,
   txCreateStrategy,
+  txExecuteStrategy,
   txCancelStrategy,
   queryVaultBalance,
   queryStrategies,
@@ -17,10 +18,11 @@ import {
   type OnChainStrategy,
 } from "@/lib/flow-transactions";
 import { parseFriendlyError } from "@/lib/parse-error";
-import { fetchEventHistory } from "@/lib/flow-events";
+import { fetchEventHistory, addEventsFromTx } from "@/lib/flow-events";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Terminal,
+  Play,
   X,
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -44,9 +46,13 @@ const RULE_TYPES: { value: RuleType; label: string; trigger: TriggerType }[] = [
 ];
 
 const INTERVALS: { value: number; label: string }[] = [
+  { value: 60, label: "1 min" },
+  { value: 300, label: "5 min" },
+  { value: 900, label: "15 min" },
+  { value: 3600, label: "1 hour" },
+  { value: 14400, label: "4 hours" },
   { value: 86400, label: "Daily" },
   { value: 604800, label: "Weekly" },
-  { value: 1209600, label: "Bi-weekly" },
   { value: 2592000, label: "Monthly" },
 ];
 
@@ -181,12 +187,18 @@ export default function DashboardPage() {
   const totalExecutions = rules.reduce((s, r) => s + r.executionCount, 0);
 
   // Wrapper for on-chain transactions
+  // fn should return the tx ID string for instant event capture
   const sendTx = async (fn: () => Promise<unknown>, successMsg?: string) => {
     setTxLoading(true);
     setTxError("");
     setTxSuccess("");
     try {
-      await fn();
+      const txId = await fn();
+      // Instantly fetch events from this tx for immediate UI update
+      if (typeof txId === "string" && walletAddress) {
+        const updated = await addEventsFromTx(txId, walletAddress);
+        setVaultHistory(updated);
+      }
       await refreshOnChainData();
       if (successMsg) {
         setTxSuccess(successMsg);
@@ -745,6 +757,14 @@ export default function DashboardPage() {
                     rule={rule}
                     mounted={mounted}
                     isLast={i === rules.length - 1}
+                    onExecute={async () => {
+                      const isReady = rule.nextExecution && new Date(rule.nextExecution) <= new Date();
+                      if (!isReady) {
+                        setTxError("Strategy isn't ready yet — wait until the scheduled time passes, then try again.");
+                        return;
+                      }
+                      await sendTx(() => txExecuteStrategy(Number(rule.id)), "Strategy executed");
+                    }}
                     onCancel={async () => {
                       await sendTx(() => txCancelStrategy(Number(rule.id)), "Strategy cancelled");
                     }}
@@ -934,11 +954,13 @@ function StrategyRow({
   rule,
   mounted,
   isLast,
+  onExecute,
   onCancel,
 }: {
   rule: AutomationRule;
   mounted: boolean;
   isLast: boolean;
+  onExecute: () => void;
   onCancel: () => void;
 }) {
   const statusColor = rule.active
@@ -965,18 +987,26 @@ function StrategyRow({
       <span className="text-[10px] font-mono text-zinc-600 shrink-0 tabular-nums">
         {rule.executionCount}x run
       </span>
-      {rule.nextExecution && rule.active && (
-        <>
-          <div className="w-px h-3 bg-zinc-800 shrink-0" />
-          <span className="text-[10px] font-mono text-zinc-600 shrink-0 tabular-nums">
-            {mounted
-              ? formatDistanceToNow(new Date(rule.nextExecution), { addSuffix: false })
-              : "---"}
-          </span>
-        </>
-      )}
+      {rule.nextExecution && rule.active && (() => {
+        const isReady = mounted && new Date(rule.nextExecution) <= new Date();
+        return (
+          <>
+            <div className="w-px h-3 bg-zinc-800 shrink-0" />
+            <span className={`text-[10px] font-mono shrink-0 tabular-nums ${isReady ? "text-green-500" : "text-zinc-600"}`}>
+              {!mounted ? "---" : isReady ? "ready" : formatDistanceToNow(new Date(rule.nextExecution), { addSuffix: false })}
+            </span>
+          </>
+        );
+      })()}
       {rule.active && (
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <button
+            onClick={onExecute}
+            title="Execute now"
+            className="p-1.5 rounded text-zinc-700 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer bg-transparent border-0 transition-colors duration-150"
+          >
+            <Play size={12} />
+          </button>
           <button
             onClick={onCancel}
             title="Cancel"

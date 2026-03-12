@@ -43,6 +43,17 @@ function toUFix64(num: number): string {
   return num.toFixed(8);
 }
 
+// Timeout wrapper — prevents hanging on onceSealed()
+const TX_TIMEOUT_MS = 60_000; // 60 seconds
+
+async function sealWithTimeout(txId: string): Promise<void> {
+  const sealed = fcl.tx(txId).onceSealed();
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("Transaction timed out after 60s. It may still complete — check your wallet.")), TX_TIMEOUT_MS),
+  );
+  await Promise.race([sealed, timeout]);
+}
+
 // ──────────────────────────────────────────────
 // Transaction templates
 // ──────────────────────────────────────────────
@@ -148,6 +159,19 @@ transaction(
             slippageTolerance: slippageTolerance,
             description: description
         )
+    }
+}
+`;
+
+const EXECUTE_STRATEGY = `
+import AutoFi from __AUTOFI__
+
+transaction(strategyID: UInt64) {
+    prepare(signer: auth(Storage, BorrowValue) &Account) {
+        let vault = signer.storage.borrow<auth(AutoFi.Execute) &AutoFi.Vault>(
+            from: AutoFi.VaultStoragePath
+        ) ?? panic("AutoFi vault not found.")
+        vault.executeStrategy(id: strategyID)
     }
 }
 `;
@@ -286,7 +310,7 @@ export async function txSetupAccount(): Promise<string> {
     cadence: cdc(SETUP_ACCOUNT),
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -298,7 +322,7 @@ export async function txDeposit(amount: number): Promise<string> {
     ],
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -310,7 +334,7 @@ export async function txWithdraw(amount: number): Promise<string> {
     ],
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -323,7 +347,7 @@ export async function txWithdrawTo(amount: number, recipient: string): Promise<s
     ],
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -350,7 +374,19 @@ export async function txCreateStrategy(params: {
     ],
     limit: 200,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
+  return txId;
+}
+
+export async function txExecuteStrategy(strategyID: number): Promise<string> {
+  const txId = await fcl.mutate({
+    cadence: cdc(EXECUTE_STRATEGY),
+    args: (arg: typeof fcl.arg, t: typeof fcl.t) => [
+      arg(strategyID.toString(), t.UInt64),
+    ],
+    limit: 200,
+  });
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -362,7 +398,7 @@ export async function txCancelStrategy(strategyID: number): Promise<string> {
     ],
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -374,7 +410,7 @@ export async function txPauseStrategy(strategyID: number): Promise<string> {
     ],
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -386,7 +422,7 @@ export async function txResumeStrategy(strategyID: number): Promise<string> {
     ],
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -395,7 +431,7 @@ export async function txEmergencyStop(): Promise<string> {
     cadence: cdc(EMERGENCY_STOP),
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 
@@ -404,7 +440,7 @@ export async function txResumeAll(): Promise<string> {
     cadence: cdc(RESUME_ALL),
     limit: 100,
   });
-  await fcl.tx(txId).onceSealed();
+  await sealWithTimeout(txId);
   return txId;
 }
 

@@ -7,6 +7,7 @@ const ACCESS_NODE = "https://rest-testnet.onflow.org";
 const AUTOFI_ADDRESS = "902e1baab3b18cac";
 const MAX_BLOCK_RANGE = 249; // API limit is 250 exclusive
 const CONTRACT_DEPLOY_BLOCK = 310569394; // Block when AutoFi was deployed to testnet
+const MAX_SCAN_BLOCKS = 5000; // Cap scan to prevent too many requests (~20 batches per type)
 
 // Event type identifiers
 const EVENT_TYPES = [
@@ -247,16 +248,19 @@ export async function fetchEventHistory(userAddress: string): Promise<VaultHisto
   let startBlock: number;
 
   if (savedBlock) {
-    // Incremental: scan from where we left off
     startBlock = parseInt(savedBlock, 10) + 1;
   } else {
-    // First load: scan from contract deployment
-    startBlock = CONTRACT_DEPLOY_BLOCK;
+    // First load: scan recent blocks only (covers ~40 min of activity)
+    startBlock = Math.max(CONTRACT_DEPLOY_BLOCK, latestBlock - MAX_SCAN_BLOCKS);
   }
 
   if (startBlock > latestBlock) {
-    // Already up to date
     return previousEntries;
+  }
+
+  // Safety cap — if gap grew too large (e.g. tab was open for hours), limit scan
+  if (latestBlock - startBlock > MAX_SCAN_BLOCKS) {
+    startBlock = latestBlock - MAX_SCAN_BLOCKS;
   }
 
   // Query all event types in parallel across the block range
@@ -290,6 +294,47 @@ export async function fetchEventHistory(userAddress: string): Promise<VaultHisto
   localStorage.setItem("autofi-event-history", JSON.stringify(merged.slice(0, 100)));
 
   return merged;
+}
+
+/**
+ * Fetches events from a single transaction result and adds them to history.
+ * Call this right after a successful tx for instant UI update.
+ */
+export async function addEventsFromTx(txId: string, userAddress: string): Promise<VaultHistory[]> {
+  try {
+    const res = await fetch(`${ACCESS_NODE}/v1/transaction_results/${txId}`);
+    if (!res.ok) return getCachedHistory();
+    const result = await res.json();
+    const events: RawFlowEvent[] = result.events || [];
+    const previousEntries: VaultHistory[] = JSON.parse(localStorage.getItem("autofi-event-history") || "[]");
+    const existingIds = new Set(previousEntries.map((e) => e.id));
+
+    const autoFiPrefix = `A.${AUTOFI_ADDRESS}.AutoFi.`;
+    for (const rawEvt of events) {
+      if (!rawEvt.type.startsWith(autoFiPrefix)) continue;
+      const parsed: ParsedFlowEvent = {
+        type: rawEvt.type,
+        transaction_id: rawEvt.transaction_id,
+        event_index: rawEvt.event_index,
+        fields: decodeEventPayload(rawEvt.payload),
+        _blockTimestamp: new Date().toISOString(),
+      };
+      const entry = eventToHistoryEntry(parsed, userAddress);
+      if (entry && !existingIds.has(entry.id)) {
+        previousEntries.unshift(entry);
+      }
+    }
+
+    previousEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    localStorage.setItem("autofi-event-history", JSON.stringify(previousEntries.slice(0, 100)));
+    return previousEntries;
+  } catch {
+    return getCachedHistory();
+  }
+}
+
+function getCachedHistory(): VaultHistory[] {
+  return JSON.parse(localStorage.getItem("autofi-event-history") || "[]");
 }
 
 /**
