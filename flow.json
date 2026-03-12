@@ -98,6 +98,13 @@
 				"testnet": "8c5303eaa26202d6",
 				"mainnet": "e467b9dd11fa00df"
 			}
+		},
+		"SwapRouter": {
+			"source": "mainnet://a6850776a94e6551.SwapRouter",
+			"aliases": {
+				"mainnet": "a6850776a94e6551",
+				"testnet": "2f8af5ed05bbde0d"
+			}
 		}
 	},
 	"networks": {
@@ -113,6 +120,16 @@
 		"testnet-account": {
 			"address": "0x902e1baab3b18cac",
 			"key": "0c7441592a07b6cc3c07a2814ee073499a858ceb192979010a36ccb869c5cbb1"
+		},
+		"mainnet-account": {
+			"address": "0x3002afb10b4ba66d",
+			"key": {
+				"type": "hex",
+				"index": 0,
+				"signatureAlgorithm": "ECDSA_secp256k1",
+				"hashAlgorithm": "SHA2_256",
+				"privateKey": "bcefa02e815c9eb0bf85a69d2b517279228cc9f54724e68c88c2187614705d4e"
+			}
 		}
 	},
 	"deployments": {
@@ -123,6 +140,12 @@
 		},
 		"testnet": {
 			"testnet-account": [
+				"AutoFi",
+				"AutoFiScheduler"
+			]
+		},
+		"mainnet": {
+			"mainnet-account": [
 				"AutoFi",
 				"AutoFiScheduler"
 			]

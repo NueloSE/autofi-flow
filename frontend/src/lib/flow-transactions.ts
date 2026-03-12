@@ -11,17 +11,26 @@ import fcl from "@/lib/fcl";
 const FLOW_NETWORK = process.env.NEXT_PUBLIC_FLOW_NETWORK || "testnet";
 
 const ADDRESSES: Record<string, Record<string, string>> = {
+  mainnet: {
+    AutoFi: "0x3002afb10b4ba66d",
+    FungibleToken: "0xf233dcee88fe0abe",
+    FlowToken: "0x1654653399040a61",
+    Scheduler: "0xe467b9dd11fa00df",
+    USDCFlow: "0xf1ab99c82dee3526",
+  },
   testnet: {
     AutoFi: "0x902e1baab3b18cac",
     FungibleToken: "0x9a0766d93b6608b7",
     FlowToken: "0x7e60df042a9c0868",
     Scheduler: "0x8c5303eaa26202d6",
+    USDCFlow: "0x64adf39cbc354fcb",
   },
   emulator: {
     AutoFi: "0xf8d6e0586b0a20c7",
     FungibleToken: "0xee82856bf20e2aa6",
     FlowToken: "0x0ae53cb6e3f42a79",
     Scheduler: "0xf8d6e0586b0a20c7",
+    USDCFlow: "0xf8d6e0586b0a20c7",
   },
 };
 
@@ -39,7 +48,8 @@ function cdc(template: string): string {
     .replace(/__AUTOFI__/g, addr("AutoFi"))
     .replace(/__FUNGIBLE_TOKEN__/g, addr("FungibleToken"))
     .replace(/__FLOW_TOKEN__/g, addr("FlowToken"))
-    .replace(/__SCHEDULER__/g, addr("Scheduler"));
+    .replace(/__SCHEDULER__/g, addr("Scheduler"))
+    .replace(/__USDC_FLOW__/g, addr("USDCFlow"));
 }
 
 function toUFix64(num: number): string {
@@ -73,6 +83,29 @@ transaction {
         signer.storage.save(<-vault, to: AutoFi.VaultStoragePath)
         let cap = signer.capabilities.storage.issue<&{AutoFi.VaultPublic}>(AutoFi.VaultStoragePath)
         signer.capabilities.publish(cap, at: AutoFi.VaultPublicPath)
+    }
+}
+`;
+
+const SETUP_USDC_VAULT = `
+import FungibleToken from __FUNGIBLE_TOKEN__
+import USDCFlow from __USDC_FLOW__
+
+transaction {
+    prepare(signer: auth(Storage, Capabilities) &Account) {
+        if signer.storage.borrow<&USDCFlow.Vault>(from: /storage/usdcFlowVault) != nil {
+            return
+        }
+        let usdcVault <- USDCFlow.createEmptyVault(vaultType: Type<@USDCFlow.Vault>())
+        signer.storage.save(<-usdcVault, to: /storage/usdcFlowVault)
+        let receiverCap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(
+            /storage/usdcFlowVault
+        )
+        signer.capabilities.publish(receiverCap, at: /public/usdcFlowReceiver)
+        let balanceCap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(
+            /storage/usdcFlowVault
+        )
+        signer.capabilities.publish(balanceCap, at: /public/usdcFlowBalance)
     }
 }
 `;
@@ -443,6 +476,19 @@ export async function txSetupAccount(): Promise<string> {
     limit: 100,
   });
   await sealWithTimeout(txId);
+
+  // Best-effort: also set up USDC vault for receiving swaps
+  try {
+    const usdcTxId = await fcl.mutate({
+      cadence: cdc(SETUP_USDC_VAULT),
+      limit: 100,
+    });
+    await sealWithTimeout(usdcTxId);
+  } catch {
+    // USDC vault setup is optional — don't block the main flow
+    console.warn("USDC vault setup skipped (may already exist or USDCFlow unavailable)");
+  }
+
   return txId;
 }
 

@@ -3,10 +3,20 @@
 
 import type { VaultHistory } from "@/store/useAutoFiStore";
 
-const ACCESS_NODE = "https://rest-testnet.onflow.org";
-const AUTOFI_ADDRESS = "902e1baab3b18cac";
+const FLOW_NETWORK = process.env.NEXT_PUBLIC_FLOW_NETWORK || "testnet";
+
+const ACCESS_NODES: Record<string, string> = {
+  mainnet: "https://rest-mainnet.onflow.org",
+  testnet: "https://rest-testnet.onflow.org",
+};
+const AUTOFI_ADDRESSES: Record<string, string> = {
+  mainnet: "3002afb10b4ba66d",
+  testnet: "902e1baab3b18cac",
+};
+
+const ACCESS_NODE = ACCESS_NODES[FLOW_NETWORK] || ACCESS_NODES.testnet;
+const AUTOFI_ADDRESS = AUTOFI_ADDRESSES[FLOW_NETWORK] || AUTOFI_ADDRESSES.testnet;
 const MAX_BLOCK_RANGE = 249; // API limit is 250 exclusive
-const CONTRACT_DEPLOY_BLOCK = 310569394; // Block when AutoFi was deployed to testnet
 const MAX_SCAN_BLOCKS = 5000; // Cap scan to prevent too many requests (~20 batches per type)
 
 // Event type identifiers
@@ -22,8 +32,9 @@ const EVENT_TYPES = [
   `A.${AUTOFI_ADDRESS}.AutoFi.EmergencyStopDeactivated`,
 ] as const;
 
-// Persisted key for last scanned block
-const LAST_BLOCK_KEY = "autofi-last-event-block";
+// Persisted keys — network-specific so testnet/mainnet don't mix
+const LAST_BLOCK_KEY = `autofi-last-event-block-${FLOW_NETWORK}`;
+const HISTORY_KEY = `autofi-event-history-${FLOW_NETWORK}`;
 
 interface FlowEventBlock {
   block_id: string;
@@ -244,14 +255,14 @@ export async function fetchEventHistory(userAddress: string): Promise<VaultHisto
 
   // Determine start block
   const savedBlock = localStorage.getItem(LAST_BLOCK_KEY);
-  const previousEntries: VaultHistory[] = JSON.parse(localStorage.getItem("autofi-event-history") || "[]");
+  const previousEntries: VaultHistory[] = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
   let startBlock: number;
 
   if (savedBlock) {
     startBlock = parseInt(savedBlock, 10) + 1;
   } else {
-    // First load: scan recent blocks only (covers ~40 min of activity)
-    startBlock = Math.max(CONTRACT_DEPLOY_BLOCK, latestBlock - MAX_SCAN_BLOCKS);
+    // First load: scan recent blocks only
+    startBlock = latestBlock - MAX_SCAN_BLOCKS;
   }
 
   if (startBlock > latestBlock) {
@@ -291,7 +302,7 @@ export async function fetchEventHistory(userAddress: string): Promise<VaultHisto
 
   // Persist
   localStorage.setItem(LAST_BLOCK_KEY, latestBlock.toString());
-  localStorage.setItem("autofi-event-history", JSON.stringify(merged.slice(0, 100)));
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(merged.slice(0, 100)));
 
   return merged;
 }
@@ -306,7 +317,7 @@ export async function addEventsFromTx(txId: string, userAddress: string): Promis
     if (!res.ok) return getCachedHistory();
     const result = await res.json();
     const events: RawFlowEvent[] = result.events || [];
-    const previousEntries: VaultHistory[] = JSON.parse(localStorage.getItem("autofi-event-history") || "[]");
+    const previousEntries: VaultHistory[] = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
     const existingIds = new Set(previousEntries.map((e) => e.id));
 
     const autoFiPrefix = `A.${AUTOFI_ADDRESS}.AutoFi.`;
@@ -326,7 +337,7 @@ export async function addEventsFromTx(txId: string, userAddress: string): Promis
     }
 
     previousEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    localStorage.setItem("autofi-event-history", JSON.stringify(previousEntries.slice(0, 100)));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(previousEntries.slice(0, 100)));
     return previousEntries;
   } catch {
     return getCachedHistory();
@@ -334,7 +345,7 @@ export async function addEventsFromTx(txId: string, userAddress: string): Promis
 }
 
 function getCachedHistory(): VaultHistory[] {
-  return JSON.parse(localStorage.getItem("autofi-event-history") || "[]");
+  return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
 }
 
 /**
@@ -342,5 +353,5 @@ function getCachedHistory(): VaultHistory[] {
  */
 export function resetEventCache() {
   localStorage.removeItem(LAST_BLOCK_KEY);
-  localStorage.removeItem("autofi-event-history");
+  localStorage.removeItem(HISTORY_KEY);
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { useAutoFiStore, AutomationRule, VaultHistory, RuleType, TriggerType } from "@/store/useAutoFiStore";
 import { RuleTypeBadge } from "@/components/RuleTypeBadge";
+import { TokenIcon } from "@/components/TokenIcon";
 import { parseNaturalLanguage } from "@/lib/parse-rule";
 import {
   txSetupAccount,
@@ -275,7 +276,7 @@ export default function DashboardPage() {
     const intervalLabel = INTERVALS.find((i) => i.value === manualInterval)?.label.toLowerCase() || "weekly";
 
     let description = "";
-    if (manualType === "DCA_INVEST") description = `Buy $${amount} of ${manualToken} ${intervalLabel}`;
+    if (manualType === "DCA_INVEST") description = `DCA ${amount} FLOW → ${manualToken} ${intervalLabel}`;
     else if (manualType === "SAVINGS_TRANSFER") description = `Save $${amount} ${manualToken} ${intervalLabel}`;
     else if (manualType === "SUBSCRIPTION_PAYMENT") description = `Pay $${amount} ${manualToken} ${intervalLabel}`;
     else if (manualType === "PRICE_DIP_BUY") description = `Buy $${amount} of ${manualToken} when price drops ${manualPricePct}%`;
@@ -493,6 +494,7 @@ export default function DashboardPage() {
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] font-mono text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">PARSED</span>
+                      <TokenIcon token={parsedRule.token || "FLOW"} size={16} />
                       <span className="text-sm text-zinc-300 font-mono">{parsedRule.description}</span>
                       {parsedRule.ruleType && <RuleTypeBadge type={parsedRule.ruleType} />}
                     </div>
@@ -531,14 +533,19 @@ export default function DashboardPage() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <div>
                   <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Token</label>
-                  <select
-                    value={manualToken}
-                    onChange={(e) => setManualToken(e.target.value)}
-                    className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
-                  >
-                    <option value="FLOW">FLOW</option>
-                    <option value="USDC">USDC</option>
-                  </select>
+                  <div className="relative">
+                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <TokenIcon token={manualToken} size={18} />
+                    </div>
+                    <select
+                      value={manualToken}
+                      onChange={(e) => setManualToken(e.target.value)}
+                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
+                    >
+                      <option value="FLOW">FLOW</option>
+                      <option value="USDC">USDC</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -609,7 +616,8 @@ export default function DashboardPage() {
         <StatCard
           icon={<Wallet size={16} />}
           label="Vault Balance"
-          value={`${vaultBalance.toFixed(2)} FLOW`}
+          value={vaultBalance.toFixed(2)}
+          valueSuffix={<span className="inline-flex items-center gap-1 ml-1.5"><TokenIcon token="FLOW" size={18} /><span className="text-sm font-normal text-zinc-500">FLOW</span></span>}
           highlight
           actions={
             <div className="flex gap-1 mt-3">
@@ -643,7 +651,8 @@ export default function DashboardPage() {
         <StatCard
           icon={<TrendingUp size={16} />}
           label="Total Invested"
-          value={`${totalInvested.toFixed(2)} FLOW`}
+          value={totalInvested.toFixed(2)}
+          valueSuffix={<span className="inline-flex items-center gap-1 ml-1.5"><TokenIcon token="FLOW" size={18} /><span className="text-sm font-normal text-zinc-500">FLOW</span></span>}
           sub="across strategies"
         />
       </motion.div>
@@ -658,7 +667,7 @@ export default function DashboardPage() {
             onSubmit={handleDeposit}
             className="mb-4 flex items-center gap-2 px-4 py-3 rounded-md border border-zinc-800 bg-zinc-900/50"
           >
-              <span className="text-xs font-mono text-zinc-500">DEPOSIT FLOW</span>
+              <span className="text-xs font-mono text-zinc-500 flex items-center gap-1.5">DEPOSIT <TokenIcon token="FLOW" size={14} /> FLOW</span>
               <input
                 type="number"
                 min="0.01"
@@ -719,7 +728,7 @@ export default function DashboardPage() {
               onSubmit={handleWithdraw}
               className="flex items-center gap-2 px-4 py-3"
             >
-              <span className="text-xs font-mono text-zinc-500">WITHDRAW FLOW</span>
+              <span className="text-xs font-mono text-zinc-500 flex items-center gap-1.5">WITHDRAW <TokenIcon token="FLOW" size={14} /> FLOW</span>
             <input
               type="number"
               min="0.01"
@@ -929,8 +938,9 @@ function ActivityList({ items, mounted }: { items: VaultHistory[]; mounted: bool
               </div>
             </div>
             {h.amount !== 0 && (
-              <span className={`text-xs font-mono font-semibold shrink-0 ${amountColor}`}>
-                {h.amount > 0 ? "+" : ""}{h.amount.toFixed(2)} FLOW
+              <span className={`text-xs font-mono font-semibold shrink-0 flex items-center gap-1 ${amountColor}`}>
+                {h.amount > 0 ? "+" : ""}{h.amount.toFixed(2)}
+                <TokenIcon token="FLOW" size={12} />
               </span>
             )}
           </div>
@@ -944,6 +954,7 @@ function StatCard({
   icon,
   label,
   value,
+  valueSuffix,
   sub,
   highlight,
   actions,
@@ -951,6 +962,7 @@ function StatCard({
   icon: React.ReactNode;
   label: string;
   value: string;
+  valueSuffix?: React.ReactNode;
   sub?: string;
   highlight?: boolean;
   actions?: React.ReactNode;
@@ -970,10 +982,10 @@ function StatCard({
           {icon}
         </div>
       </div>
-      <div className={`text-xl font-mono font-bold tracking-tight
+      <div className={`text-xl font-mono font-bold tracking-tight flex items-center
         ${highlight ? "text-amber-500" : "text-zinc-200"}`}
       >
-        {value}
+        {value}{valueSuffix}
       </div>
       {sub && (
         <div className="text-[10px] font-mono text-zinc-700 mt-0.5">{sub}</div>
@@ -1037,8 +1049,9 @@ function StrategyRow({
       <span className="text-sm font-mono text-zinc-300 flex-1 min-w-0 truncate">
         {rule.description}
       </span>
-      <span className="text-xs font-mono text-zinc-500 shrink-0 tabular-nums">
-        {rule.amount} FLOW
+      <span className="text-xs font-mono text-zinc-500 shrink-0 tabular-nums flex items-center gap-1">
+        <TokenIcon token={rule.token || "FLOW"} size={14} />
+        {rule.amount} {rule.token || "FLOW"}
       </span>
       <div className="w-px h-3 bg-zinc-800 shrink-0" />
       <span className="text-[10px] font-mono text-zinc-600 shrink-0 tabular-nums">
