@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Shield, Loader2 } from "lucide-react";
+import { LayoutDashboard, PieChart, Shield, Loader2 } from "lucide-react";
 import { useAutoFiStore } from "@/store/useAutoFiStore";
 import { txEmergencyStop, txResumeAll, queryIsEmergencyStopped } from "@/lib/flow-transactions";
 import { parseFriendlyError } from "@/lib/parse-error";
@@ -11,6 +11,7 @@ import WalletButton from "./WalletButton";
 
 const NAV_ITEMS = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/portfolio", icon: PieChart, label: "Portfolio" },
 ];
 
 export default function Sidebar() {
@@ -46,7 +47,7 @@ export default function Sidebar() {
             AutoFi
           </span>
           <span className="text-[9px] font-mono font-medium text-amber-500 border border-amber-500/30 px-1.5 py-0.5 rounded uppercase tracking-wider">
-            testnet
+            mainnet
           </span>
         </Link>
       </div>

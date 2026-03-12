@@ -132,7 +132,7 @@ export default function LandingPage() {
               AutoFi
             </span>
             <span className="text-[9px] font-mono font-medium text-amber-500 border border-amber-500/30 px-1.5 py-0.5 rounded uppercase tracking-wider">
-              testnet
+              mainnet
             </span>
           </div>
           <div className="flex items-center gap-6">
@@ -184,7 +184,7 @@ export default function LandingPage() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
               </span>
               <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-[0.2em]">
-                Live on Flow Testnet
+                Live on Flow Mainnet
               </span>
             </motion.div>
 
@@ -323,7 +323,7 @@ export default function LandingPage() {
 
                 {/* Footer */}
                 <div className="px-4 py-2.5 border-t border-zinc-800/40 bg-zinc-950/30 flex items-center justify-between">
-                  <span className="text-[9px] font-mono text-zinc-700">Flow Testnet</span>
+                  <span className="text-[9px] font-mono text-zinc-700">Flow Mainnet</span>
                   <span className="text-[9px] font-mono text-zinc-700 flex items-center gap-1.5">
                     <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
                     streaming

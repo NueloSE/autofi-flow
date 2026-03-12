@@ -10,6 +10,7 @@
 
 import "FungibleToken"
 import "FlowToken"
+import "SwapRouter"
 
 access(all) contract AutoFi {
 
@@ -51,6 +52,13 @@ access(all) contract AutoFi {
         amountSpent: UFix64,
         executionCount: UInt64,
         nextExecution: UFix64
+    )
+    access(all) event SwapExecuted(
+        strategyID: UInt64,
+        owner: Address,
+        amountIn: UFix64,
+        amountOut: UFix64,
+        targetToken: String
     )
 
     // Safety
@@ -358,7 +366,8 @@ access(all) contract AutoFi {
 
         // ── Execution (require Execute entitlement) ──
 
-        /// Execute a strategy — called by scheduled transaction or manual trigger
+        /// Execute a strategy — called by scheduled transaction or manual trigger.
+        /// If the strategy targets a non-FLOW token, swaps via IncrementFi SwapRouter.
         access(Execute) fun executeStrategy(id: UInt64) {
             pre {
                 self.strategies[id] != nil: "Strategy not found"
@@ -400,22 +409,52 @@ access(all) contract AutoFi {
                 return
             }
 
-            // Execute: deduct funds from AutoFi vault
-            // In production: this would swap via IncrementFi and deposit the target token
-            // For MVP: we withdraw FLOW from the vault back to the user's main wallet
             let spent = strategy.amountPerExecution
             let withdrawn <- self.flowVault.withdraw(amount: spent)
-
-            // Deposit back to user's main FLOW wallet
             let ownerAccount = getAccount(self.owner!.address)
-            let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
-                /public/flowTokenReceiver
-            )
-            if receiverRef != nil {
-                receiverRef!.deposit(from: <-withdrawn)
+
+            // Determine swap path for this strategy's target token
+            let tokenKeyPath = AutoFi.getSwapPath(strategy.token)
+            let receiverPath = AutoFi.getReceiverPath(strategy.token)
+
+            if tokenKeyPath != nil && receiverPath != nil {
+                // ── Real DEX swap via IncrementFi SwapRouter ──
+                let swapped <- SwapRouter.swapExactTokensForTokens(
+                    exactVaultIn: <-withdrawn,
+                    amountOutMin: 0.0,
+                    tokenKeyPath: tokenKeyPath!,
+                    deadline: now + 600.0
+                )
+                let amountOut = swapped.balance
+
+                let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+                    receiverPath!
+                )
+                if receiverRef != nil {
+                    receiverRef!.deposit(from: <-swapped)
+                } else {
+                    // User doesn't have a vault for target token — panic
+                    // (should have been set up during strategy creation)
+                    panic("No receiver for target token: ".concat(strategy.token))
+                }
+
+                emit SwapExecuted(
+                    strategyID: id,
+                    owner: self.owner!.address,
+                    amountIn: spent,
+                    amountOut: amountOut,
+                    targetToken: strategy.token
+                )
             } else {
-                // Fallback: if receiver not available, re-deposit to vault
-                self.flowVault.deposit(from: <-withdrawn)
+                // ── No swap needed — deposit FLOW back to user ──
+                let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+                    /public/flowTokenReceiver
+                )
+                if receiverRef != nil {
+                    receiverRef!.deposit(from: <-withdrawn)
+                } else {
+                    self.flowVault.deposit(from: <-withdrawn)
+                }
             }
 
             self.strategies[id]!.recordExecution(amount: spent, timestamp: now)
@@ -452,6 +491,37 @@ access(all) contract AutoFi {
     /// Create a new empty vault resource
     access(all) fun createVault(): @Vault {
         return <- create Vault()
+    }
+
+    /// Swap path for a target token — returns [flowKey, targetKey] for IncrementFi.
+    /// Returns nil if no swap needed (e.g. token == "FLOW").
+    access(all) view fun getSwapPath(_ token: String): [String]? {
+        let flowKey = "A.1654653399040a61.FlowToken"
+        switch token {
+            case "USDC":
+                return [flowKey, "A.f1ab99c82dee3526.USDCFlow"]
+            case "stFLOW":
+                return [flowKey, "A.d6f80565193ad727.stFlowToken"]
+            case "DUST":
+                return [flowKey, "A.921ea449dffec68a.FlovatarDustToken"]
+            default:
+                return nil
+        }
+    }
+
+    /// Public receiver path for a target token.
+    /// Returns nil if token is FLOW (handled separately).
+    access(all) view fun getReceiverPath(_ token: String): PublicPath? {
+        switch token {
+            case "USDC":
+                return /public/usdcFlowReceiver
+            case "stFLOW":
+                return /public/stFlowTokenReceiver
+            case "DUST":
+                return /public/FlovatarDustTokenReceiver
+            default:
+                return nil
+        }
     }
 
     /// Helper: get strategy type name from raw value

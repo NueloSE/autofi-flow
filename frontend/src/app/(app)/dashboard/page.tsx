@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { useAutoFiStore, AutomationRule, VaultHistory, RuleType, TriggerType } from "@/store/useAutoFiStore";
 import { RuleTypeBadge } from "@/components/RuleTypeBadge";
+import { TokenIcon } from "@/components/TokenIcon";
 import { parseNaturalLanguage } from "@/lib/parse-rule";
+import { getFlowUsdPrice, formatUsd } from "@/lib/flow-prices";
 import {
   txSetupAccount,
   txDeposit,
@@ -143,6 +145,14 @@ export default function DashboardPage() {
   const [txSuccess, setTxSuccess] = useState("");
   const [showActivityModal, setShowActivityModal] = useState(false);
 
+  // FLOW price
+  const [flowPrice, setFlowPrice] = useState(0);
+  useEffect(() => {
+    getFlowUsdPrice().then(setFlowPrice);
+    const iv = setInterval(() => getFlowUsdPrice().then(setFlowPrice), 60_000);
+    return () => clearInterval(iv);
+  }, []);
+
   // Fetch all on-chain data
   const refreshOnChainData = useCallback(async () => {
     if (!walletAddress) return;
@@ -168,20 +178,28 @@ export default function DashboardPage() {
     }
   }, [walletAddress, setVaultBalance, setRules, setVaultHistory, setAllPaused]);
 
-  // Auto-setup account + fetch data when wallet connects
+  // Auto-setup account once per session (survives page navigation)
   useEffect(() => {
     if (!walletAddress) return;
+    const key = `autofi_setup_${walletAddress}`;
+    if (sessionStorage.getItem(key)) {
+      refreshOnChainData();
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
         await txSetupAccount();
+        sessionStorage.setItem(key, "1");
       } catch {
-        // vault may already exist
+        // vault may already exist — still mark as done so we don't re-prompt
+        sessionStorage.setItem(key, "1");
       }
       if (!cancelled) refreshOnChainData();
     })();
     return () => { cancelled = true; };
-  }, [walletAddress, refreshOnChainData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletAddress]);
 
   // Auto-poll on-chain data every 15s so scheduled executions appear without manual refresh
   useEffect(() => {
@@ -275,7 +293,7 @@ export default function DashboardPage() {
     const intervalLabel = INTERVALS.find((i) => i.value === manualInterval)?.label.toLowerCase() || "weekly";
 
     let description = "";
-    if (manualType === "DCA_INVEST") description = `Buy $${amount} of ${manualToken} ${intervalLabel}`;
+    if (manualType === "DCA_INVEST") description = `DCA ${amount} FLOW → ${manualToken} ${intervalLabel}`;
     else if (manualType === "SAVINGS_TRANSFER") description = `Save $${amount} ${manualToken} ${intervalLabel}`;
     else if (manualType === "SUBSCRIPTION_PAYMENT") description = `Pay $${amount} ${manualToken} ${intervalLabel}`;
     else if (manualType === "PRICE_DIP_BUY") description = `Buy $${amount} of ${manualToken} when price drops ${manualPricePct}%`;
@@ -493,6 +511,7 @@ export default function DashboardPage() {
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] font-mono text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">PARSED</span>
+                      <TokenIcon token={parsedRule.token || "FLOW"} size={16} />
                       <span className="text-sm text-zinc-300 font-mono">{parsedRule.description}</span>
                       {parsedRule.ruleType && <RuleTypeBadge type={parsedRule.ruleType} />}
                     </div>
@@ -528,30 +547,55 @@ export default function DashboardPage() {
                 ))}
               </div>
 
+              {/* Contextual hint */}
+              <p className="text-[11px] font-mono text-zinc-600 mb-3">
+                {manualType === "DCA_INVEST" && <>Spend <span className="text-zinc-400">FLOW</span> from your vault to buy <span className="text-zinc-400">{manualToken}</span> on a schedule</>}
+                {manualType === "SAVINGS_TRANSFER" && <>Auto-transfer <span className="text-zinc-400">{manualToken}</span> to your savings on a schedule</>}
+                {manualType === "SUBSCRIPTION_PAYMENT" && <>Auto-pay <span className="text-zinc-400">{manualToken}</span> on a recurring schedule</>}
+                {manualType === "PRICE_DIP_BUY" && <>Buy <span className="text-zinc-400">{manualToken}</span> when price drops by a percentage</>}
+                {manualType === "PROFIT_SELL" && <>Sell <span className="text-zinc-400">{manualToken}</span> when price rises by a percentage</>}
+              </p>
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <div>
-                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Token</label>
-                  <select
-                    value={manualToken}
-                    onChange={(e) => setManualToken(e.target.value)}
-                    className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
-                  >
-                    <option value="FLOW">FLOW</option>
-                    <option value="USDC">USDC</option>
-                  </select>
+                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
+                    {manualType === "DCA_INVEST" ? "Buy Token" : manualType === "PROFIT_SELL" ? "Sell Token" : "Token"}
+                  </label>
+                  <div className="relative">
+                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <TokenIcon token={manualToken} size={18} />
+                    </div>
+                    <select
+                      value={manualToken}
+                      onChange={(e) => setManualToken(e.target.value)}
+                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
+                    >
+                      <option value="FLOW">FLOW</option>
+                      <option value="USDC">USDC</option>
+                      <option value="stFLOW">stFLOW</option>
+                      <option value="DUST">DUST</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Amount ($)</label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={manualAmount}
-                    onChange={(e) => setManualAmount(e.target.value)}
-                    className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
-                    placeholder="50"
-                  />
+                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
+                    {manualType === "DCA_INVEST" ? "FLOW per swap" : manualType === "SUBSCRIPTION_PAYMENT" ? "Pay amount" : manualType === "SAVINGS_TRANSFER" ? "Save amount" : `${manualToken} amount`}
+                  </label>
+                  <div className="relative">
+                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <TokenIcon token={manualType === "DCA_INVEST" ? "FLOW" : manualToken} size={16} />
+                    </div>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={manualAmount}
+                      onChange={(e) => setManualAmount(e.target.value)}
+                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
+                      placeholder="50"
+                    />
+                  </div>
                 </div>
 
                 {isPriceTrigger ? (
@@ -609,7 +653,9 @@ export default function DashboardPage() {
         <StatCard
           icon={<Wallet size={16} />}
           label="Vault Balance"
-          value={`${vaultBalance.toFixed(2)} FLOW`}
+          value={vaultBalance.toFixed(2)}
+          valueSuffix={<span className="inline-flex items-center gap-1 ml-1.5"><TokenIcon token="FLOW" size={18} /><span className="text-sm font-normal text-zinc-500">FLOW</span></span>}
+          sub={flowPrice > 0 ? `≈ ${formatUsd(vaultBalance * flowPrice)}` : undefined}
           highlight
           actions={
             <div className="flex gap-1 mt-3">
@@ -643,8 +689,9 @@ export default function DashboardPage() {
         <StatCard
           icon={<TrendingUp size={16} />}
           label="Total Invested"
-          value={`${totalInvested.toFixed(2)} FLOW`}
-          sub="across strategies"
+          value={totalInvested.toFixed(2)}
+          valueSuffix={<span className="inline-flex items-center gap-1 ml-1.5"><TokenIcon token="FLOW" size={18} /><span className="text-sm font-normal text-zinc-500">FLOW</span></span>}
+          sub={flowPrice > 0 ? `≈ ${formatUsd(totalInvested * flowPrice)} across strategies` : "across strategies"}
         />
       </motion.div>
 
@@ -658,7 +705,7 @@ export default function DashboardPage() {
             onSubmit={handleDeposit}
             className="mb-4 flex items-center gap-2 px-4 py-3 rounded-md border border-zinc-800 bg-zinc-900/50"
           >
-              <span className="text-xs font-mono text-zinc-500">DEPOSIT FLOW</span>
+              <span className="text-xs font-mono text-zinc-500 flex items-center gap-1.5">DEPOSIT <TokenIcon token="FLOW" size={14} /> FLOW</span>
               <input
                 type="number"
                 min="0.01"
@@ -719,7 +766,7 @@ export default function DashboardPage() {
               onSubmit={handleWithdraw}
               className="flex items-center gap-2 px-4 py-3"
             >
-              <span className="text-xs font-mono text-zinc-500">WITHDRAW FLOW</span>
+              <span className="text-xs font-mono text-zinc-500 flex items-center gap-1.5">WITHDRAW <TokenIcon token="FLOW" size={14} /> FLOW</span>
             <input
               type="number"
               min="0.01"
@@ -790,6 +837,7 @@ export default function DashboardPage() {
                     rule={rule}
                     mounted={mounted}
                     isLast={i === rules.length - 1}
+                    flowPrice={flowPrice}
                     onExecute={async () => {
                       const isReady = rule.nextExecution && new Date(rule.nextExecution) <= new Date();
                       if (!isReady) {
@@ -929,8 +977,9 @@ function ActivityList({ items, mounted }: { items: VaultHistory[]; mounted: bool
               </div>
             </div>
             {h.amount !== 0 && (
-              <span className={`text-xs font-mono font-semibold shrink-0 ${amountColor}`}>
-                {h.amount > 0 ? "+" : ""}{h.amount.toFixed(2)} FLOW
+              <span className={`text-xs font-mono font-semibold shrink-0 flex items-center gap-1 ${amountColor}`}>
+                {h.amount > 0 ? "+" : ""}{h.amount.toFixed(2)}
+                <TokenIcon token="FLOW" size={12} />
               </span>
             )}
           </div>
@@ -944,6 +993,7 @@ function StatCard({
   icon,
   label,
   value,
+  valueSuffix,
   sub,
   highlight,
   actions,
@@ -951,6 +1001,7 @@ function StatCard({
   icon: React.ReactNode;
   label: string;
   value: string;
+  valueSuffix?: React.ReactNode;
   sub?: string;
   highlight?: boolean;
   actions?: React.ReactNode;
@@ -970,10 +1021,10 @@ function StatCard({
           {icon}
         </div>
       </div>
-      <div className={`text-xl font-mono font-bold tracking-tight
+      <div className={`text-xl font-mono font-bold tracking-tight flex items-center
         ${highlight ? "text-amber-500" : "text-zinc-200"}`}
       >
-        {value}
+        {value}{valueSuffix}
       </div>
       {sub && (
         <div className="text-[10px] font-mono text-zinc-700 mt-0.5">{sub}</div>
@@ -1000,12 +1051,14 @@ function StrategyRow({
   rule,
   mounted,
   isLast,
+  flowPrice,
   onExecute,
   onCancel,
 }: {
   rule: AutomationRule;
   mounted: boolean;
   isLast: boolean;
+  flowPrice: number;
   onExecute: () => void;
   onCancel: () => void;
 }) {
@@ -1037,12 +1090,16 @@ function StrategyRow({
       <span className="text-sm font-mono text-zinc-300 flex-1 min-w-0 truncate">
         {rule.description}
       </span>
-      <span className="text-xs font-mono text-zinc-500 shrink-0 tabular-nums">
-        {rule.amount} FLOW
+      <span className="text-xs font-mono text-zinc-500 shrink-0 tabular-nums flex items-center gap-1">
+        <TokenIcon token={rule.token || "FLOW"} size={14} />
+        {rule.amount} {rule.token || "FLOW"}
       </span>
       <div className="w-px h-3 bg-zinc-800 shrink-0" />
       <span className="text-[10px] font-mono text-zinc-600 shrink-0 tabular-nums">
         {rule.executionCount}x run
+        {flowPrice > 0 && rule.totalSpent > 0 && (
+          <span className="text-zinc-700"> · {formatUsd(rule.totalSpent * flowPrice)}</span>
+        )}
       </span>
       {rule.nextExecution && rule.active && (
         <>

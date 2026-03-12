@@ -2,9 +2,11 @@
 
 const FRIENDLY_MESSAGES: [RegExp, string][] = [
   // Contract pre-condition errors
-  [/Insufficient balance for first execution/i, "Your vault balance is too low. Deposit FLOW before creating a strategy."],
-  [/AutoFi vault not found.*setup_account/i, "Your AutoFi vault hasn't been set up yet. Please reconnect your wallet."],
-  [/AutoFi vault not found/i, "AutoFi vault not found. Try disconnecting and reconnecting your wallet."],
+  [/Insufficient balance for first execution/i, "Your vault balance is too low. Deposit FLOW first — you need at least enough for one execution."],
+  [/Insufficient vault balance/i, "Not enough FLOW in your vault. Deposit more FLOW before executing."],
+  [/AutoFi vault not found.*setup_account/i, "Your AutoFi vault hasn't been set up yet. Try reconnecting your wallet, then deposit some FLOW to get started."],
+  [/AutoFi vault not found/i, "AutoFi vault not found. Reconnect your wallet — it will be set up automatically. Then deposit FLOW to start."],
+  [/No receiver for target token/i, "Your account doesn't have a USDC vault yet. Reconnect your wallet to set it up automatically."],
   [/Could not borrow FLOW vault/i, "Unable to access your FLOW token vault. Make sure your wallet is set up correctly."],
   [/Invalid strategy type/i, "Invalid strategy type selected. Please try again."],
   [/Strategy not found/i, "This strategy no longer exists. It may have already been cancelled."],

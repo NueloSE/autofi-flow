@@ -11,17 +11,28 @@ import fcl from "@/lib/fcl";
 const FLOW_NETWORK = process.env.NEXT_PUBLIC_FLOW_NETWORK || "testnet";
 
 const ADDRESSES: Record<string, Record<string, string>> = {
+  mainnet: {
+    AutoFi: "0x3002afb10b4ba66d",
+    FungibleToken: "0xf233dcee88fe0abe",
+    FlowToken: "0x1654653399040a61",
+    Scheduler: "0xe467b9dd11fa00df",
+    USDCFlow: "0xf1ab99c82dee3526",
+    stFlowToken: "0xd6f80565193ad727",
+    FlovatarDustToken: "0x921ea449dffec68a",
+  },
   testnet: {
     AutoFi: "0x902e1baab3b18cac",
     FungibleToken: "0x9a0766d93b6608b7",
     FlowToken: "0x7e60df042a9c0868",
     Scheduler: "0x8c5303eaa26202d6",
+    USDCFlow: "0x64adf39cbc354fcb",
   },
   emulator: {
     AutoFi: "0xf8d6e0586b0a20c7",
     FungibleToken: "0xee82856bf20e2aa6",
     FlowToken: "0x0ae53cb6e3f42a79",
     Scheduler: "0xf8d6e0586b0a20c7",
+    USDCFlow: "0xf8d6e0586b0a20c7",
   },
 };
 
@@ -39,7 +50,10 @@ function cdc(template: string): string {
     .replace(/__AUTOFI__/g, addr("AutoFi"))
     .replace(/__FUNGIBLE_TOKEN__/g, addr("FungibleToken"))
     .replace(/__FLOW_TOKEN__/g, addr("FlowToken"))
-    .replace(/__SCHEDULER__/g, addr("Scheduler"));
+    .replace(/__SCHEDULER__/g, addr("Scheduler"))
+    .replace(/__USDC_FLOW__/g, addr("USDCFlow"))
+    .replace(/__STFLOW_TOKEN__/g, addr("stFlowToken"))
+    .replace(/__DUST_TOKEN__/g, addr("FlovatarDustToken"));
 }
 
 function toUFix64(num: number): string {
@@ -61,18 +75,65 @@ async function sealWithTimeout(txId: string): Promise<void> {
 // Transaction templates
 // ──────────────────────────────────────────────
 
+// Single combined setup transaction — one wallet approval for everything
 const SETUP_ACCOUNT = `
 import AutoFi from __AUTOFI__
+import FungibleToken from __FUNGIBLE_TOKEN__
+import USDCFlow from __USDC_FLOW__
+import stFlowToken from __STFLOW_TOKEN__
+import FlovatarDustToken from __DUST_TOKEN__
 
 transaction {
     prepare(signer: auth(Storage, Capabilities) &Account) {
-        if signer.storage.borrow<&AutoFi.Vault>(from: AutoFi.VaultStoragePath) != nil {
-            return
+        // ── AutoFi Vault ──
+        if signer.storage.borrow<&AutoFi.Vault>(from: AutoFi.VaultStoragePath) == nil {
+            let vault <- AutoFi.createVault()
+            signer.storage.save(<-vault, to: AutoFi.VaultStoragePath)
+            let cap = signer.capabilities.storage.issue<&{AutoFi.VaultPublic}>(AutoFi.VaultStoragePath)
+            signer.capabilities.publish(cap, at: AutoFi.VaultPublicPath)
         }
-        let vault <- AutoFi.createVault()
-        signer.storage.save(<-vault, to: AutoFi.VaultStoragePath)
-        let cap = signer.capabilities.storage.issue<&{AutoFi.VaultPublic}>(AutoFi.VaultStoragePath)
-        signer.capabilities.publish(cap, at: AutoFi.VaultPublicPath)
+
+        // ── USDC Vault ──
+        if signer.storage.borrow<&USDCFlow.Vault>(from: /storage/usdcFlowVault) == nil {
+            let usdcVault <- USDCFlow.createEmptyVault(vaultType: Type<@USDCFlow.Vault>())
+            signer.storage.save(<-usdcVault, to: /storage/usdcFlowVault)
+        }
+        if signer.capabilities.borrow<&{FungibleToken.Receiver}>(/public/usdcFlowReceiver) == nil {
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(/storage/usdcFlowVault)
+            signer.capabilities.publish(cap, at: /public/usdcFlowReceiver)
+        }
+        if signer.capabilities.borrow<&{FungibleToken.Balance}>(/public/usdcFlowBalance) == nil {
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(/storage/usdcFlowVault)
+            signer.capabilities.publish(cap, at: /public/usdcFlowBalance)
+        }
+
+        // ── stFLOW Vault ──
+        if signer.storage.borrow<&stFlowToken.Vault>(from: /storage/stFlowTokenVault) == nil {
+            let vault <- stFlowToken.createEmptyVault(vaultType: Type<@stFlowToken.Vault>())
+            signer.storage.save(<-vault, to: /storage/stFlowTokenVault)
+        }
+        if signer.capabilities.borrow<&{FungibleToken.Receiver}>(/public/stFlowTokenReceiver) == nil {
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(/storage/stFlowTokenVault)
+            signer.capabilities.publish(cap, at: /public/stFlowTokenReceiver)
+        }
+        if signer.capabilities.borrow<&{FungibleToken.Balance}>(/public/stFlowTokenBalance) == nil {
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(/storage/stFlowTokenVault)
+            signer.capabilities.publish(cap, at: /public/stFlowTokenBalance)
+        }
+
+        // ── DUST Vault ──
+        if signer.storage.borrow<&FlovatarDustToken.Vault>(from: /storage/FlovatarDustTokenVault) == nil {
+            let vault <- FlovatarDustToken.createEmptyVault(vaultType: Type<@FlovatarDustToken.Vault>())
+            signer.storage.save(<-vault, to: /storage/FlovatarDustTokenVault)
+        }
+        if signer.capabilities.borrow<&{FungibleToken.Receiver}>(/public/FlovatarDustTokenReceiver) == nil {
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Receiver}>(/storage/FlovatarDustTokenVault)
+            signer.capabilities.publish(cap, at: /public/FlovatarDustTokenReceiver)
+        }
+        if signer.capabilities.borrow<&{FungibleToken.Balance}>(/public/FlovatarDustTokenBalance) == nil {
+            let cap = signer.capabilities.storage.issue<&{FungibleToken.Balance}>(/storage/FlovatarDustTokenVault)
+            signer.capabilities.publish(cap, at: /public/FlovatarDustTokenBalance)
+        }
     }
 }
 `;
@@ -440,7 +501,7 @@ const STRATEGY_TYPE_MAP: Record<string, number> = {
 export async function txSetupAccount(): Promise<string> {
   const txId = await fcl.mutate({
     cadence: cdc(SETUP_ACCOUNT),
-    limit: 100,
+    limit: 300,
   });
   await sealWithTimeout(txId);
   return txId;

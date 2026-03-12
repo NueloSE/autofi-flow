@@ -1,302 +1,291 @@
-# AutoFi – Autopilot Finance on Flow
+<p align="center">
+  <img src="frontend/public/flow-logo.svg" width="60" />
+</p>
 
-**AutoFi** is a Consumer DeFi application built on the [Flow blockchain](https://flow.com) that allows users to automate financial actions such as **investing, subscriptions, savings, and trading strategies** using rule-based automation.
+<h1 align="center">AutoFi — Your DCA on Autopilot</h1>
 
-Instead of manually executing transactions, users create simple automation rules and the blockchain executes them automatically.
+<p align="center">
+  <strong>On-chain financial automation powered by Flow's native Scheduled Transactions.</strong><br/>
+  No bots. No keepers. No cron jobs. Just the chain doing the work.
+</p>
 
-
----
-
-# Overview
-
-AutoFi acts as an **autonomous financial assistant for crypto users**.
-
-Users can create automation rules like:
-- Buy $50 of FLOW every week
-- Pay 10 USDC monthly to a subscription
-- Save 20 USDC every Friday
-- Buy FLOW when price drops 5%
-- Sell FLOW when price rises 10%
-
-
-Once created, **AutoFi executes these rules automatically on-chain**, eliminating the need for bots, scripts, or manual transactions.
+<p align="center">
+  <a href="#why-flow">Why Flow</a> · <a href="#features">Features</a> · <a href="#how-it-works">How It Works</a> · <a href="#architecture">Architecture</a> · <a href="#quick-start">Quick Start</a> · <a href="#live-on-mainnet">Live on Mainnet</a>
+</p>
 
 ---
 
-# Core Features
+## The Problem
 
-| Feature | Description |
-|------|------|
-| **DCA Investing** | Automatically buy tokens on a recurring schedule |
-| **Subscription Payments** | Recurring payments to any wallet address |
-| **Savings Automation** | Automatically move funds into savings |
-| **Buy the Dip** | Automatically buy tokens when price drops by X% |
-| **Take Profit** | Automatically sell tokens when price rises by X% |
-| **Natural Language Rules** | Create automation rules using plain English |
-| **Strategy Simulation** | Preview projected outcomes before creating rules |
-| **Safety Guards** | Spending caps, slippage protection, emergency stop |
-| **Email Alerts** | Pre-execution email with one-click cancel link |
+DCA (Dollar-Cost Averaging) is one of the most effective investment strategies — but in crypto, it's a pain. You either:
 
----
+- **Set calendar reminders** and manually swap every week
+- **Trust a centralized app** with your keys
+- **Run keeper bots** that cost gas and can go offline
 
-# Example Use Cases
+Every existing solution requires off-chain infrastructure that can fail, get hacked, or rug.
 
-### DCA Investing
+## The Solution
 
-Automatically build a position in tokens over time.
+**AutoFi** lets you type a strategy in plain English, and **Flow's blockchain executes it automatically** — forever, on schedule, with zero off-chain dependencies.
 
-Example:
-
-Buy $50 of FLOW every week
-
-
-### Subscription Payments
-
-Automate recurring payments similar to traditional subscription services.
-
-Example:
-
-Pay 10 USDC every month
-
-
-### Savings Automation
-
-Encourage consistent saving habits.
-
-Example:
-
-Save 20 USDC every Friday
-
-
-### Buy the Dip
-
-Automatically purchase assets when the price drops.
-
-Example:
-
-Buy FLOW when price drops 5%
-
-
-### Take Profit
-
-Lock in gains automatically.
-
-Example:
-
-Sell FLOW when price rises 10%
-
----
-
-# Advanced Features
-
-## Natural Language Automation
-
-Users can create automation rules using simple plain English instructions.
-
-Example input:
-
-Buy $50 of FLOW every Monday
-
-
-AutoFi automatically converts this into a structured automation rule.
-
----
-
-## Strategy Simulation
-
-Before creating a rule, AutoFi shows a simulation preview of potential outcomes.
-
-Example:
-
-Invest $50 weekly
-
-Simulation preview:
-```cadence
-After 3 months
-Total invested: $600
-Estimated portfolio value: $720
+```
+> Buy 5 USDC every 5 minutes
 ```
 
-
-This helps users understand expected results before committing to automation.
-
----
-
-## Safety Guard System
-
-AutoFi includes built-in protections to prevent risky automations.
-
-Safety features include:
-
-• Maximum monthly spending limits  
-• Slippage protection  
-• Emergency stop for all automation rules  
+That's it. The chain handles the rest.
 
 ---
 
-## Email Notifications
+## Why Flow
 
-Users can optionally receive email alerts before an automated rule executes.
+AutoFi isn't just *deployed* on Flow — it's **only possible on Flow**. We leverage three features no other chain has:
 
-Email includes:
-
-- Rule description
-- Scheduled execution time
-- One-click cancel link
-
-This gives users time to cancel the transaction before it runs.
-
-AutoFi uses **Resend** (free tier: 3,000 emails/month) to send notifications.
+| Feature | What It Does | Why It Matters |
+|---|---|---|
+| **Scheduled Transactions** | The chain itself executes future transactions at specified times | No Chainlink Automation, no Gelato, no cron jobs. Zero off-chain infrastructure. |
+| **Cadence Resource Model** | User funds are stored as owned resources, not in a shared pool | Your vault is *yours*. Not a mapping in someone else's contract. |
+| **MEV Resistance** | Flow's architecture prevents frontrunning and sandwich attacks | Your DCA swaps can't be exploited by MEV bots. Every swap gets a fair price. |
 
 ---
 
-# Quick Start
+## Live on Mainnet
 
-## 1. Clone the Repository
+AutoFi is live on Flow Mainnet. Try it out:
+
+- [AutoFi Contract](https://flowscan.org/contract/0x3002afb10b4ba66d)
+- [AutoFi Scheduler Contract](https://flowscan.org/contract/0x3002afb10b4ba66d)
+- [AutoFi Frontend](https://autofi.flow.link)
+
+## Features
+
+### Core Automation
+- **DCA Investing** — Automatically swap FLOW into USDC, stFLOW, or DUST on a recurring schedule via IncrementFi DEX
+- **Savings Automation** — Auto-transfer funds to savings on a schedule
+- **Subscription Payments** — Recurring payments to any wallet address
+- **Buy the Dip** — Buy tokens when price drops by X%
+- **Take Profit** — Sell tokens when price rises by X%
+
+### User Experience
+- **Natural Language Input** — Type `"Buy 5 USDC every 5 min"` and AutoFi parses it into a strategy
+- **Manual Mode** — Full control with dropdowns for token, amount, frequency
+- **Real-time Countdown** — Live timers showing when each strategy executes next
+- **On-chain Activity Feed** — All history pulled directly from Flow contract events
+
+### Safety
+- **Monthly Spend Caps** — Strategies won't exceed your budget
+- **Emergency Stop** — One-click pause on all active strategies
+- **Per-strategy Controls** — Pause, resume, or cancel any individual strategy
+- **Slippage Protection** — Built into every DEX swap
+
+### Supported Tokens
+| Token | Type | DEX Pool |
+|---|---|---|
+| **FLOW** | Native | Base pair |
+| **USDC** | Stablecoin (bridged) | FLOW/USDCFlow |
+| **stFLOW** | Liquid staking | FLOW/stFLOW |
+| **DUST** | Flovatar ecosystem | FLOW/DUST |
+
+All swaps execute through **IncrementFi's SwapRouter** — the primary Cadence-native DEX on Flow.
+
+---
+
+## How It Works
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────┐
+│   User types:   │     │  AutoFi Contract  │     │  Flow Scheduled Tx  │
+│  "Buy 5 USDC    │────>│  Creates strategy │────>│  Executes on-chain  │
+│   every 5 min"  │     │  in user's vault  │     │  at scheduled time  │
+└─────────────────┘     └──────────────────┘     └──────────┬──────────┘
+                                                            │
+                        ┌──────────────────┐                │
+                        │  IncrementFi DEX │<───────────────┘
+                        │  FLOW → USDC     │  Swaps tokens, deposits
+                        │  swap executed   │  output to user's wallet
+                        └──────────────────┘
+                                │
+                                v
+                    ┌───────────────────────┐
+                    │  Schedules NEXT swap  │  Self-recurring loop —
+                    │  (same interval)      │  chain keeps going
+                    └───────────────────────┘
+```
+
+**The self-recurring pattern is key**: each execution schedules the *next* one before completing. The chain perpetually runs your strategy until you cancel it.
+
+---
+
+## Architecture
+
+### Smart Contracts (Cadence)
+
+| Contract | Address (Mainnet) | Purpose |
+|---|---|---|
+| `AutoFi.cdc` | `0x3002afb10b4ba66d` | Core vault, strategies, DEX swap execution |
+| `AutoFiScheduler.cdc` | `0x3002afb10b4ba66d` | Bridges AutoFi with Flow's `FlowTransactionScheduler` |
+
+### Contract Design
+
+```
+AutoFi.Vault (per-user resource)
+├── flowVault: @FlowToken.Vault     — deposited FLOW funds
+├── strategies: {UInt64: Strategy}   — user's automation strategies
+├── executionLog: [ExecutionRecord]  — on-chain execution history
+└── emergencyStopped: Bool           — safety kill switch
+
+AutoFiScheduler.Handler (per-user resource)
+├── vaultCap → AutoFi.Vault         — executes strategies
+├── flowVaultCap → FlowToken.Vault  — pays scheduling fees
+└── managerCap → Scheduler.Manager  — schedules next execution
+```
+
+### Frontend (Next.js + TypeScript)
+
+```
+frontend/src/
+├── app/
+│   ├── page.tsx                    — Landing page
+│   └── (app)/dashboard/page.tsx    — Main dashboard
+├── components/
+│   ├── TokenIcon.tsx               — Token logo display
+│   └── RuleTypeBadge.tsx           — Strategy type badges
+├── lib/
+│   ├── fcl.ts                      — FCL wallet config (mainnet/testnet)
+│   ├── flow-transactions.ts        — Cadence transaction templates + FCL calls
+│   ├── flow-events.ts              — On-chain event fetching for activity feed
+│   ├── parse-rule.ts               — Natural language → strategy parser
+│   └── parse-error.ts              — Cadence errors → friendly messages
+└── store/
+    └── useAutoFiStore.ts           — Zustand state management
+```
+
+### Key Dependencies
+| Dependency | Role |
+|---|---|
+| `FlowTransactionScheduler` | Flow's native scheduled execution engine |
+| `SwapRouter` (IncrementFi) | On-chain token swaps |
+| `@onflow/fcl` | Wallet connection + transaction signing |
+
+---
+
+## Live on Mainnet
+
+AutoFi is deployed and running on **Flow Mainnet**:
+
+- **Contract**: [`0x3002afb10b4ba66d`](https://www.flowscan.io/account/0x3002afb10b4ba66d)
+- **Network**: Flow Mainnet
+- **DEX**: IncrementFi (SwapRouter `0xa6850776a94e6551`)
+
+---
+
+## Quick Start
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) v18+
+- [Flow CLI](https://developers.flow.com/tools/flow-cli/install) (optional, for contract deployment)
+- A Flow wallet ([Flow Wallet](https://wallet.flow.com/) or [Lilico](https://lilico.app/))
+
+### 1. Clone & Install
 
 ```bash
 git clone https://github.com/youruser/autofi-flow.git
-cd autofi-flow
+cd autofi-flow/frontend
 npm install
 ```
-## 2. Configure Environment Variables
+
+### 2. Configure Environment
+
 ```bash
-cp .env.local.example .env.local
-```
-## 3. Fill in the required values:
-```bash
-RESEND_API_KEY=re_...
-NEXT_PUBLIC_FLOW_NETWORK=testnet
-CANCEL_TOKEN_SECRET=your_secret
+# frontend/.env.local
+NEXT_PUBLIC_FLOW_NETWORK=mainnet
 ```
 
-## 4. Run Development Server
+### 3. Run
+
 ```bash
 npm run dev
 ```
 
-open: 
-```
-http://localhost:3000
-```
+Open [http://localhost:3000](http://localhost:3000)
 
-# Architecture
+### 4. Use It
 
-```mermaid
-autofi-flow/
-├── cadence/
-│   ├── contracts/
-│   │   └── AutoFiEngine.cdc
-│   ├── transactions/
-│   │   ├── deposit_funds.cdc
-│   │   ├── create_rule.cdc
-│   │   ├── cancel_rule.cdc
-│   │   ├── execute_rule.cdc
-│   │   └── pause_all_rules.cdc
-│   └── scripts/
-│       ├── get_user_rules.cdc
-│       └── get_vault_balance.cdc
-│
-├── src/
-│   ├── app/
-│   │   ├── page.tsx
-│   │   ├── (app)/
-│   │   │   ├── dashboard/
-│   │   │   ├── rules/create/
-│   │   │   ├── vault/
-│   │   │   └── simulation/
-│   │   └── api/
-│   │       ├── parse-rule/
-│   │       └── notify/
-│
-│   ├── components/
-│   │   ├── Sidebar.tsx
-│   │   ├── WalletButton.tsx
-│   │   ├── RuleTypeBadge.tsx
-│   │   └── SimulationPreview.tsx
-│
-│   ├── lib/
-│   │   ├── fcl.ts
-│   │   └── email.ts
-│
-│   └── store/
-│       └── useAutoFiStore.ts
-│
-└── flow.json
-```
-
-# Smart Contract
-### AutoFiEngine.cdc
-
-The core Cadence contract manages:
-
-- User vaults
-
-- Automation rules
-
-- Rule execution
-
-- Safety protections
-
-- Emergency stop
-
-### Rule Types
-
-```cadence
-// Rule Types
-DCA_INVEST
-SUBSCRIPTION_PAYMENT
-SAVINGS_TRANSFER
-PRICE_DIP_BUY
-PROFIT_SELL
-
-```
-
-### Trigger Types
-
-```cadence
-// Trigger Types
-TIME_BASED
-PRICE_BASED
-
-```
+1. Connect your Flow wallet
+2. Deposit FLOW into your AutoFi vault
+3. Type a strategy: `"Buy 5 USDC every 5 min"`
+4. Watch it execute automatically on-chain
 
 ---
-## Deploy Contracts (Flow Testnet)
-1. Install Flow CLI:
+
+## Contract Deployment
+
+To deploy your own instance:
+
 ```bash
-curl -fsSL https://install.flow.com | bash
-
-OR
-
+# Install Flow CLI
 brew install flow-cli
-```
-2. Configure your testnet account inside flow.json.
 
-3. Deploy contracts:
-```bash
+# Deploy to testnet
 flow project deploy --network testnet
+
+# Deploy to mainnet
+flow accounts add-contract AutoFi cadence/contracts/AutoFi.cdc --network mainnet --signer mainnet-account
+flow accounts add-contract AutoFiScheduler cadence/contracts/AutoFiScheduler.cdc --network mainnet --signer mainnet-account
 ```
-
-### Example Automation Flow
-
-1. User deposits funds into AutoFi vault
-
-2. User creates an automation rule
-
-3. Rule is stored on-chain
-
-4. Scheduled or price trigger activates rule
-
-5. Optional email alert is sent
-
-6. Rule executes automatically
-
-7. Next execution time updates
 
 ---
-## Vision
 
-**AutoFi** aims to make decentralized finance simple, automated, and accessible to everyday users.
+## Strategy Types
 
-Instead of interacting with complex DeFi protocols manually, users simply define financial rules and let their finances run on autopilot.
+| Type | Trigger | Example |
+|---|---|---|
+| `DCA_INVEST` | Time-based | "Buy 5 USDC every 5 min" |
+| `SAVINGS_TRANSFER` | Time-based | "Save 10 FLOW weekly" |
+| `SUBSCRIPTION_PAYMENT` | Time-based | "Pay 20 USDC monthly" |
+| `PRICE_DIP_BUY` | Price-based | "Buy FLOW when price drops 5%" |
+| `PROFIT_SELL` | Price-based | "Sell FLOW when price rises 10%" |
+
+---
+
+## What Makes This Different
+
+| Feature | AutoFi (Flow) | Existing DCA Tools |
+|---|---|---|
+| Execution | Chain-native scheduled transactions | Off-chain keepers/bots |
+| Infrastructure | Zero — the chain IS the infrastructure | Servers, cron jobs, monitoring |
+| Custody | User owns their vault resource | Funds in shared contract pools |
+| MEV Protection | Built into Flow | None (sandwich attacks common) |
+| Uptime | 100% (as long as Flow runs) | Depends on bot/keeper uptime |
+| Cost | One-time scheduling fee | Ongoing gas for keeper transactions |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Blockchain | Flow (Cadence) |
+| Smart Contracts | Cadence — `AutoFi.cdc`, `AutoFiScheduler.cdc` |
+| Scheduling | Flow Native Scheduled Transactions |
+| DEX | IncrementFi SwapRouter |
+| Frontend | Next.js 15 + TypeScript |
+| Styling | Tailwind CSS |
+| Wallet | Flow Client Library (FCL) |
+| State | Zustand |
+
+---
+
+## Hackathon
+
+Built for **PL Genesis: Frontiers of Collaboration Hackathon**.
+
+- **Flow Challenge** — $10,000 pool
+- **Fresh Code Track** — $50,000 pool
+- **Category**: Crypto — Upgrade Economies & Governance Systems
+
+---
+
+<p align="center">
+  <strong>AutoFi</strong> — Your finances on autopilot. Powered by Flow.<br/>
+</p>
