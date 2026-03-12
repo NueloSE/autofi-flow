@@ -530,9 +530,20 @@ export default function DashboardPage() {
                 ))}
               </div>
 
+              {/* Contextual hint */}
+              <p className="text-[11px] font-mono text-zinc-600 mb-3">
+                {manualType === "DCA_INVEST" && <>Spend <span className="text-zinc-400">FLOW</span> from your vault to buy <span className="text-zinc-400">{manualToken}</span> on a schedule</>}
+                {manualType === "SAVINGS_TRANSFER" && <>Auto-transfer <span className="text-zinc-400">{manualToken}</span> to your savings on a schedule</>}
+                {manualType === "SUBSCRIPTION_PAYMENT" && <>Auto-pay <span className="text-zinc-400">{manualToken}</span> on a recurring schedule</>}
+                {manualType === "PRICE_DIP_BUY" && <>Buy <span className="text-zinc-400">{manualToken}</span> when price drops by a percentage</>}
+                {manualType === "PROFIT_SELL" && <>Sell <span className="text-zinc-400">{manualToken}</span> when price rises by a percentage</>}
+              </p>
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <div>
-                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Token</label>
+                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
+                    {manualType === "DCA_INVEST" ? "Buy Token" : manualType === "PROFIT_SELL" ? "Sell Token" : "Token"}
+                  </label>
                   <div className="relative">
                     <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
                       <TokenIcon token={manualToken} size={18} />
@@ -549,16 +560,23 @@ export default function DashboardPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Amount ($)</label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={manualAmount}
-                    onChange={(e) => setManualAmount(e.target.value)}
-                    className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
-                    placeholder="50"
-                  />
+                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
+                    {manualType === "DCA_INVEST" ? "FLOW per swap" : manualType === "SUBSCRIPTION_PAYMENT" ? "Pay amount" : manualType === "SAVINGS_TRANSFER" ? "Save amount" : `${manualToken} amount`}
+                  </label>
+                  <div className="relative">
+                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <TokenIcon token={manualType === "DCA_INVEST" ? "FLOW" : manualToken} size={16} />
+                    </div>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={manualAmount}
+                      onChange={(e) => setManualAmount(e.target.value)}
+                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
+                      placeholder="50"
+                    />
+                  </div>
                 </div>
 
                 {isPriceTrigger ? (
