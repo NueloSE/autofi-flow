@@ -61,15 +61,23 @@ AutoFi is live on Flow Mainnet. Try it out:
 
 ### Core Automation
 - **DCA Investing** — Automatically swap FLOW into USDC, stFLOW, or DUST on a recurring schedule via IncrementFi DEX
-- **Savings Automation** — Auto-transfer funds to savings on a schedule
-- **Subscription Payments** — Recurring payments to any wallet address
-- **Buy the Dip** — Buy tokens when price drops by X%
-- **Take Profit** — Sell tokens when price rises by X%
+- **Savings Automation** — Auto-transfer FLOW from vault back to your wallet on a schedule (no swap)
+- **Subscription Payments** — Recurring or one-time payments to any Flow address
+- **Buy the Dip** — Set a USD price target; AutoFi checks the DEX every 30 min and swaps when FLOW drops below your target
+- **Take Profit** — Set a USD price target; AutoFi auto-sells when FLOW rises above your target
+- **One-time Transfers** — Send FLOW to any address without setting up a recurring schedule
 
 ### User Experience
-- **Natural Language Input** — Type `"Buy 5 USDC every 5 min"` and AutoFi parses it into a strategy
+- **Natural Language Input** — Type strategies in plain English:
+  - `"Buy 5 USDC every 5 min"`
+  - `"Send 10 FLOW to 0x3002afb10b4ba66d once"`
+  - `"Buy USDC when FLOW drops below $0.025"`
+  - `"Save 2 FLOW weekly"`
 - **Manual Mode** — Full control with dropdowns for token, amount, frequency
-- **Real-time Countdown** — Live timers showing when each strategy executes next
+- **Live Price Chart** — Interactive FLOW/USD chart with 24h history from CoinGecko, hover crosshair, and target price line overlay
+- **Price Target UI** — "Drops below" / "Rises above" toggle with quick -10%, -5%, +5%, +10% buttons
+- **Real-time Countdown** — Live timers for time-based strategies; "Watching price..." indicator for price-gated strategies
+- **Toast Notifications** — Loading, success, and error toasts for every on-chain transaction
 - **On-chain Activity Feed** — All history pulled directly from Flow contract events
 
 ### Safety
@@ -77,6 +85,7 @@ AutoFi is live on Flow Mainnet. Try it out:
 - **Emergency Stop** — One-click pause on all active strategies
 - **Per-strategy Controls** — Pause, resume, or cancel any individual strategy
 - **Slippage Protection** — Built into every DEX swap
+- **Price Guards** — Price strategies skip execution when conditions aren't met (no wasted swaps)
 
 ### Supported Tokens
 | Token | Type | DEX Pool |
@@ -122,7 +131,8 @@ All swaps execute through **IncrementFi's SwapRouter** — the primary Cadence-n
 
 | Contract | Address (Mainnet) | Purpose |
 |---|---|---|
-| `AutoFi.cdc` | `0x3002afb10b4ba66d` | Core vault, strategies, DEX swap execution |
+| `AutoFi.cdc` | `0x3002afb10b4ba66d` | Core vault, strategies, DEX swap execution, price-gated logic |
+| `AutoFiConfig.cdc` | `0x3002afb10b4ba66d` | Extended strategy data (recipients, price thresholds) |
 | `AutoFiScheduler.cdc` | `0x3002afb10b4ba66d` | Bridges AutoFi with Flow's `FlowTransactionScheduler` |
 
 ### Contract Design
@@ -148,12 +158,14 @@ frontend/src/
 │   ├── page.tsx                    — Landing page
 │   └── (app)/dashboard/page.tsx    — Main dashboard
 ├── components/
+│   ├── PriceChart.tsx              — Interactive FLOW/USD line chart (CoinGecko)
 │   ├── TokenIcon.tsx               — Token logo display
 │   └── RuleTypeBadge.tsx           — Strategy type badges
 ├── lib/
 │   ├── fcl.ts                      — FCL wallet config (mainnet/testnet)
 │   ├── flow-transactions.ts        — Cadence transaction templates + FCL calls
 │   ├── flow-events.ts              — On-chain event fetching for activity feed
+│   ├── flow-prices.ts              — CoinGecko price + 24h chart data
 │   ├── parse-rule.ts               — Natural language → strategy parser
 │   └── parse-error.ts              — Cadence errors → friendly messages
 └── store/
@@ -164,8 +176,10 @@ frontend/src/
 | Dependency | Role |
 |---|---|
 | `FlowTransactionScheduler` | Flow's native scheduled execution engine |
-| `SwapRouter` (IncrementFi) | On-chain token swaps |
+| `SwapRouter` (IncrementFi) | On-chain token swaps + price quotes (`getAmountsOut`) |
 | `@onflow/fcl` | Wallet connection + transaction signing |
+| `sonner` | Toast notifications for transaction feedback |
+| CoinGecko API | Live FLOW/USD price + 24h chart data |
 
 ---
 
@@ -230,6 +244,7 @@ brew install flow-cli
 flow project deploy --network testnet
 
 # Deploy to mainnet
+flow accounts add-contract AutoFiConfig cadence/contracts/AutoFiConfig.cdc --network mainnet --signer mainnet-account
 flow accounts add-contract AutoFi cadence/contracts/AutoFi.cdc --network mainnet --signer mainnet-account
 flow accounts add-contract AutoFiScheduler cadence/contracts/AutoFiScheduler.cdc --network mainnet --signer mainnet-account
 ```
@@ -242,9 +257,9 @@ flow accounts add-contract AutoFiScheduler cadence/contracts/AutoFiScheduler.cdc
 |---|---|---|
 | `DCA_INVEST` | Time-based | "Buy 5 USDC every 5 min" |
 | `SAVINGS_TRANSFER` | Time-based | "Save 10 FLOW weekly" |
-| `SUBSCRIPTION_PAYMENT` | Time-based | "Pay 20 USDC monthly" |
-| `PRICE_DIP_BUY` | Price-based | "Buy FLOW when price drops 5%" |
-| `PROFIT_SELL` | Price-based | "Sell FLOW when price rises 10%" |
+| `SUBSCRIPTION_PAYMENT` | Time-based | "Send 5 FLOW to 0x3002... once" |
+| `PRICE_DIP_BUY` | Price-based (30m checks) | "Buy USDC when FLOW drops below $0.025" |
+| `PROFIT_SELL` | Price-based (30m checks) | "Sell FLOW when price rises above $0.04" |
 
 ---
 
@@ -266,7 +281,7 @@ flow accounts add-contract AutoFiScheduler cadence/contracts/AutoFiScheduler.cdc
 | Layer | Technology |
 |---|---|
 | Blockchain | Flow (Cadence) |
-| Smart Contracts | Cadence — `AutoFi.cdc`, `AutoFiScheduler.cdc` |
+| Smart Contracts | Cadence — `AutoFi.cdc`, `AutoFiConfig.cdc`, `AutoFiScheduler.cdc` |
 | Scheduling | Flow Native Scheduled Transactions |
 | DEX | IncrementFi SwapRouter |
 | Frontend | Next.js 15 + TypeScript |
