@@ -206,7 +206,9 @@ transaction(
     intervalSeconds: UInt64,
     maxMonthlySpend: UFix64,
     slippageTolerance: UFix64,
-    description: String
+    description: String,
+    recipient: String,
+    priceThreshold: UFix64
 ) {
     prepare(signer: auth(Storage, BorrowValue) &Account) {
         let vault = signer.storage.borrow<auth(AutoFi.Owner) &AutoFi.Vault>(
@@ -221,7 +223,9 @@ transaction(
             intervalSeconds: intervalSeconds,
             maxMonthlySpend: maxMonthlySpend,
             slippageTolerance: slippageTolerance,
-            description: description
+            description: description,
+            recipient: recipient,
+            priceThreshold: priceThreshold
         )
     }
 }
@@ -255,7 +259,9 @@ transaction(
     intervalSeconds: UInt64,
     maxMonthlySpend: UFix64,
     slippageTolerance: UFix64,
-    description: String
+    description: String,
+    recipient: String,
+    priceThreshold: UFix64
 ) {
     prepare(signer: auth(Storage, Capabilities, BorrowValue) &Account) {
         // 1. Create the strategy
@@ -273,7 +279,9 @@ transaction(
             intervalSeconds: intervalSeconds,
             maxMonthlySpend: maxMonthlySpend,
             slippageTolerance: slippageTolerance,
-            description: description
+            description: description,
+            recipient: recipient,
+            priceThreshold: priceThreshold
         )
 
         // 2. Setup Scheduler Manager (once per account)
@@ -552,6 +560,8 @@ export async function txCreateStrategy(params: {
   maxMonthlySpend: number;
   slippageTolerance: number;
   description: string;
+  recipient?: string;
+  priceThreshold?: number;
 }): Promise<string> {
   const typeRaw = STRATEGY_TYPE_MAP[params.strategyType] ?? 0;
   const txId = await fcl.mutate({
@@ -564,6 +574,8 @@ export async function txCreateStrategy(params: {
       arg(toUFix64(params.maxMonthlySpend), t.UFix64),
       arg(toUFix64(params.slippageTolerance), t.UFix64),
       arg(params.description, t.String),
+      arg(params.recipient || "", t.String),
+      arg(toUFix64(params.priceThreshold || 0), t.UFix64),
     ],
     limit: 200,
   });
@@ -579,6 +591,8 @@ export async function txCreateScheduledStrategy(params: {
   maxMonthlySpend: number;
   slippageTolerance: number;
   description: string;
+  recipient?: string;
+  priceThreshold?: number;
 }): Promise<string> {
   const typeRaw = STRATEGY_TYPE_MAP[params.strategyType] ?? 0;
   const txId = await fcl.mutate({
@@ -591,6 +605,8 @@ export async function txCreateScheduledStrategy(params: {
       arg(toUFix64(params.maxMonthlySpend), t.UFix64),
       arg(toUFix64(params.slippageTolerance), t.UFix64),
       arg(params.description, t.String),
+      arg(params.recipient || "", t.String),
+      arg(toUFix64(params.priceThreshold || 0), t.UFix64),
     ],
     limit: 500,
   });

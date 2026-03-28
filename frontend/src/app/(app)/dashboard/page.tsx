@@ -6,6 +6,7 @@ import { RuleTypeBadge } from "@/components/RuleTypeBadge";
 import { TokenIcon } from "@/components/TokenIcon";
 import { parseNaturalLanguage } from "@/lib/parse-rule";
 import { getFlowUsdPrice, formatUsd } from "@/lib/flow-prices";
+import { PriceChart } from "@/components/PriceChart";
 import {
   txSetupAccount,
   txDeposit,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/flow-transactions";
 import { parseFriendlyError } from "@/lib/parse-error";
 import { fetchEventHistory, addEventsFromTx } from "@/lib/flow-events";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Terminal,
@@ -36,7 +38,6 @@ import {
   TrendingUp,
   Zap,
   SlidersHorizontal,
-  Loader2,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 
@@ -49,6 +50,7 @@ const RULE_TYPES: { value: RuleType; label: string; trigger: TriggerType }[] = [
 ];
 
 const INTERVALS: { value: number; label: string }[] = [
+  { value: 0, label: "One-time" },
   { value: 60, label: "1 min" },
   { value: 300, label: "5 min" },
   { value: 900, label: "15 min" },
@@ -119,7 +121,6 @@ export default function DashboardPage() {
 
   // Loading state for on-chain transactions
   const [txLoading, setTxLoading] = useState(false);
-  const [txError, setTxError] = useState("");
 
   // Creation mode
   const [mode, setMode] = useState<"nlp" | "manual">("nlp");
@@ -131,10 +132,13 @@ export default function DashboardPage() {
 
   // Manual form state
   const [manualType, setManualType] = useState<RuleType>("DCA_INVEST");
-  const [manualToken, setManualToken] = useState("FLOW");
+  const [manualToken, setManualToken] = useState("USDC");
   const [manualAmount, setManualAmount] = useState("50");
   const [manualInterval, setManualInterval] = useState(604800);
   const [manualPricePct, setManualPricePct] = useState("5");
+  const [manualRecipient, setManualRecipient] = useState("");
+  const [priceDirection, setPriceDirection] = useState<"below" | "above">("below");
+  const [targetPrice, setTargetPrice] = useState("");
 
   // Shared state
   const [showDeposit, setShowDeposit] = useState(false);
@@ -142,13 +146,21 @@ export default function DashboardPage() {
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawTo, setWithdrawTo] = useState("");
-  const [txSuccess, setTxSuccess] = useState("");
   const [showActivityModal, setShowActivityModal] = useState(false);
+
+  // Sync price direction with strategy type
+  useEffect(() => {
+    if (manualType === "PRICE_DIP_BUY") setPriceDirection("below");
+    else if (manualType === "PROFIT_SELL") setPriceDirection("above");
+  }, [manualType]);
 
   // FLOW price
   const [flowPrice, setFlowPrice] = useState(0);
   useEffect(() => {
-    getFlowUsdPrice().then(setFlowPrice);
+    getFlowUsdPrice().then((p) => {
+      setFlowPrice(p);
+      if (!targetPrice) setTargetPrice((p * 0.95).toFixed(4));
+    });
     const iv = setInterval(() => getFlowUsdPrice().then(setFlowPrice), 60_000);
     return () => clearInterval(iv);
   }, []);
@@ -225,8 +237,7 @@ export default function DashboardPage() {
   // fn should return the tx ID string for instant event capture
   const sendTx = async (fn: () => Promise<unknown>, successMsg?: string) => {
     setTxLoading(true);
-    setTxError("");
-    setTxSuccess("");
+    const toastId = toast.loading("Sending transaction to Flow...");
     try {
       const txId = await fn();
       // Instantly fetch events from this tx for immediate UI update
@@ -235,13 +246,10 @@ export default function DashboardPage() {
         setVaultHistory(updated);
       }
       await refreshOnChainData();
-      if (successMsg) {
-        setTxSuccess(successMsg);
-        setTimeout(() => setTxSuccess(""), 3000);
-      }
+      toast.success(successMsg || "Transaction confirmed", { id: toastId });
     } catch (err) {
       console.error("Transaction failed:", err);
-      setTxError(parseFriendlyError(err));
+      toast.error(parseFriendlyError(err), { id: toastId });
     }
     setTxLoading(false);
   };
@@ -260,6 +268,13 @@ export default function DashboardPage() {
 
   const createFromParsed = async () => {
     if (!parsedRule || !isConnected) return;
+    const isPriceParsed = parsedRule.triggerType === "PRICE";
+    let priceThreshold = 0;
+    if (isPriceParsed && flowPrice > 0 && parsedRule.referencePrice && parsedRule.referencePrice > 0) {
+      priceThreshold = ((parsedRule.amount || 5) * parsedRule.referencePrice) / flowPrice;
+    }
+    // Extract recipient from description for subscriptions (address was parsed into input)
+    const addrMatch = commandInput.match(/\b(0x[a-fA-F0-9]{8,16})\b/);
     const strategyParams = {
       strategyType: parsedRule.ruleType!,
       token: parsedRule.token!,
@@ -268,6 +283,8 @@ export default function DashboardPage() {
       maxMonthlySpend: 0,
       slippageTolerance: 2,
       description: parsedRule.description || "",
+      recipient: parsedRule.ruleType === "SUBSCRIPTION_PAYMENT" && addrMatch ? addrMatch[1] : "",
+      priceThreshold,
     };
     await sendTx(
       async () => {
@@ -290,23 +307,41 @@ export default function DashboardPage() {
     if (!amount || amount <= 0) return;
     const selected = RULE_TYPES.find((r) => r.value === manualType)!;
     const isPriceTrig = selected.trigger === "PRICE";
-    const intervalLabel = INTERVALS.find((i) => i.value === manualInterval)?.label.toLowerCase() || "weekly";
+    const isOneTime = manualInterval === 0;
+    const intervalLabel = isOneTime ? "one-time" : (INTERVALS.find((i) => i.value === manualInterval)?.label.toLowerCase() || "weekly");
 
     let description = "";
-    if (manualType === "DCA_INVEST") description = `DCA ${amount} FLOW → ${manualToken} ${intervalLabel}`;
-    else if (manualType === "SAVINGS_TRANSFER") description = `Save $${amount} ${manualToken} ${intervalLabel}`;
-    else if (manualType === "SUBSCRIPTION_PAYMENT") description = `Pay $${amount} ${manualToken} ${intervalLabel}`;
-    else if (manualType === "PRICE_DIP_BUY") description = `Buy $${amount} of ${manualToken} when price drops ${manualPricePct}%`;
-    else if (manualType === "PROFIT_SELL") description = `Sell $${amount} of ${manualToken} when price rises ${manualPricePct}%`;
+    if (manualType === "DCA_INVEST") description = isOneTime ? `Swap ${amount} FLOW → ${manualToken}` : `DCA ${amount} FLOW → ${manualToken} ${intervalLabel}`;
+    else if (manualType === "SAVINGS_TRANSFER") description = isOneTime ? `Transfer ${amount} FLOW to wallet` : `Auto-save ${amount} FLOW to wallet ${intervalLabel}`;
+    else if (manualType === "SUBSCRIPTION_PAYMENT") {
+      const shortAddr = manualRecipient.trim().length > 10 ? `${manualRecipient.trim().slice(0, 6)}...${manualRecipient.trim().slice(-4)}` : manualRecipient.trim();
+      description = isOneTime ? `Send ${amount} FLOW to ${shortAddr}` : `Pay ${amount} FLOW to ${shortAddr} ${intervalLabel}`;
+    }
+    else if (manualType === "PRICE_DIP_BUY") description = `Buy ${manualToken} with ${amount} FLOW when FLOW drops below $${targetPrice}`;
+    else if (manualType === "PROFIT_SELL") description = `Sell ${amount} FLOW → ${manualToken} when FLOW rises above $${targetPrice}`;
+
+    // For price strategies: convert USD target price → expected swap output
+    // If FLOW target = $0.025 and amount = 5 FLOW, then expected USDC output = 5 * 0.025 = 0.125
+    // The contract compares getAmountsOut() against this threshold
+    let priceThreshold = 0;
+    if (isPriceTrig && flowPrice > 0) {
+      const target = parseFloat(targetPrice) || 0;
+      if (target > 0) {
+        // Convert: at target FLOW/USD price, how much target token would amount FLOW get?
+        priceThreshold = (amount * target) / flowPrice;
+      }
+    }
 
     const strategyParams = {
-      strategyType: manualType,
-      token: manualToken,
+      strategyType: manualType === "PROFIT_SELL" && priceDirection === "below" ? "PRICE_DIP_BUY" : manualType === "PRICE_DIP_BUY" && priceDirection === "above" ? "PROFIT_SELL" : manualType,
+      token: (manualType === "SAVINGS_TRANSFER" || manualType === "SUBSCRIPTION_PAYMENT") ? "FLOW" : manualToken,
       amountPerExecution: amount,
-      intervalSeconds: isPriceTrig ? 86400 : manualInterval,
+      intervalSeconds: isPriceTrig ? 1800 : (isOneTime ? 3153600000 : manualInterval),
       maxMonthlySpend: 0,
       slippageTolerance: 2,
       description,
+      recipient: manualType === "SUBSCRIPTION_PAYMENT" ? manualRecipient.trim() : "",
+      priceThreshold,
     };
     await sendTx(
       async () => {
@@ -377,51 +412,6 @@ export default function DashboardPage() {
             className="mb-5 px-4 py-3 rounded-md border border-red-500/30 bg-red-500/5 text-red-400 text-sm font-mono"
           >
             ALERT: All automations paused — emergency stop active
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Transaction loading */}
-      <AnimatePresence>
-        {txLoading && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-5 px-4 py-3 rounded-md border border-amber-500/20 bg-amber-500/5 text-amber-500 text-sm font-mono flex items-center gap-2"
-          >
-            <Loader2 size={14} className="animate-spin" /> Sending transaction to Flow...
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Error banner */}
-      <AnimatePresence>
-        {txError && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-5 px-4 py-3 rounded-md border border-red-500/30 bg-red-500/5 text-red-400 text-sm font-mono flex items-center justify-between"
-          >
-            <span>Error: {txError}</span>
-            <button onClick={() => setTxError("")} className="text-red-500 hover:text-red-300 cursor-pointer bg-transparent border-0">
-              <X size={14} />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Success flash */}
-      <AnimatePresence>
-        {txSuccess && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-5 px-4 py-3 rounded-md border border-green-500/30 bg-green-500/5 text-green-400 text-sm font-mono flex items-center gap-2"
-          >
-            <Zap size={14} /> {txSuccess}
           </motion.div>
         )}
       </AnimatePresence>
@@ -549,95 +539,256 @@ export default function DashboardPage() {
 
               {/* Contextual hint */}
               <p className="text-[11px] font-mono text-zinc-600 mb-3">
-                {manualType === "DCA_INVEST" && <>Spend <span className="text-zinc-400">FLOW</span> from your vault to buy <span className="text-zinc-400">{manualToken}</span> on a schedule</>}
-                {manualType === "SAVINGS_TRANSFER" && <>Auto-transfer <span className="text-zinc-400">{manualToken}</span> to your savings on a schedule</>}
-                {manualType === "SUBSCRIPTION_PAYMENT" && <>Auto-pay <span className="text-zinc-400">{manualToken}</span> on a recurring schedule</>}
-                {manualType === "PRICE_DIP_BUY" && <>Buy <span className="text-zinc-400">{manualToken}</span> when price drops by a percentage</>}
-                {manualType === "PROFIT_SELL" && <>Sell <span className="text-zinc-400">{manualToken}</span> when price rises by a percentage</>}
+                {manualType === "DCA_INVEST" && <>Swap <span className="text-zinc-400">FLOW</span> from your vault → <span className="text-zinc-400">{manualToken}</span> on a recurring schedule</>}
+                {manualType === "SAVINGS_TRANSFER" && <>Auto-transfer <span className="text-zinc-400">FLOW</span> from vault back to your wallet on a schedule (no swap)</>}
+                {manualType === "SUBSCRIPTION_PAYMENT" && <>Auto-send <span className="text-zinc-400">FLOW</span> to a recipient address on a recurring schedule</>}
+                {manualType === "PRICE_DIP_BUY" && <>Set price targets. When FLOW drops below your target, AutoFi auto-swaps via IncrementFi.</>}
+                {manualType === "PROFIT_SELL" && <>Set price targets. When FLOW rises above your target, AutoFi locks gains automatically.</>}
               </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                <div>
-                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
-                    {manualType === "DCA_INVEST" ? "Buy Token" : manualType === "PROFIT_SELL" ? "Sell Token" : "Token"}
-                  </label>
-                  <div className="relative">
-                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                      <TokenIcon token={manualToken} size={18} />
-                    </div>
-                    <select
-                      value={manualToken}
-                      onChange={(e) => setManualToken(e.target.value)}
-                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
-                    >
-                      <option value="FLOW">FLOW</option>
-                      <option value="USDC">USDC</option>
-                      <option value="stFLOW">stFLOW</option>
-                      <option value="DUST">DUST</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
-                    {manualType === "DCA_INVEST" ? "FLOW per swap" : manualType === "SUBSCRIPTION_PAYMENT" ? "Pay amount" : manualType === "SAVINGS_TRANSFER" ? "Save amount" : `${manualToken} amount`}
-                  </label>
-                  <div className="relative">
-                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                      <TokenIcon token={manualType === "DCA_INVEST" ? "FLOW" : manualToken} size={16} />
-                    </div>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={manualAmount}
-                      onChange={(e) => setManualAmount(e.target.value)}
-                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
-                      placeholder="50"
+              {/* ── Price Strategy UI (chart + order form) ── */}
+              {isPriceTrigger ? (
+                <div className="space-y-4">
+                  {/* Price chart */}
+                  <div className="border border-zinc-800/60 rounded-lg p-4 bg-zinc-950/50">
+                    <PriceChart
+                      currentPrice={flowPrice}
+                      targetPrice={parseFloat(targetPrice) || undefined}
+                      direction={priceDirection}
                     />
                   </div>
-                </div>
 
-                {isPriceTrigger ? (
+                  {/* Order form */}
+                  <div className="border border-zinc-800/60 rounded-lg p-4 bg-zinc-950/50">
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">New Price Order</span>
+                    </div>
+
+                    {/* Direction toggle */}
+                    <div className="mb-4">
+                      <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Execute when FLOW</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => { setPriceDirection("below"); setManualType("PRICE_DIP_BUY"); }}
+                          className={`flex-1 py-2 rounded text-xs font-mono cursor-pointer transition-colors duration-150 border ${
+                            priceDirection === "below"
+                              ? "bg-red-500/10 border-red-500/30 text-red-400"
+                              : "bg-transparent border-zinc-800 text-zinc-500 hover:text-zinc-400"
+                          }`}
+                        >
+                          Drops below
+                        </button>
+                        <button
+                          onClick={() => { setPriceDirection("above"); setManualType("PROFIT_SELL"); }}
+                          className={`flex-1 py-2 rounded text-xs font-mono cursor-pointer transition-colors duration-150 border ${
+                            priceDirection === "above"
+                              ? "bg-green-500/10 border-green-500/30 text-green-400"
+                              : "bg-transparent border-zinc-800 text-zinc-500 hover:text-zinc-400"
+                          }`}
+                        >
+                          Rises above
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Target price + quick % buttons */}
+                    <div className="mb-4">
+                      <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Target price</label>
+                      <div className="flex gap-2 items-center">
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-mono">$</span>
+                          <input
+                            type="number"
+                            min="0.0001"
+                            step="0.0001"
+                            value={targetPrice}
+                            onChange={(e) => setTargetPrice(e.target.value)}
+                            className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-7 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-1.5 mt-2">
+                        {[-10, -5, 5, 10].map((pct) => (
+                          <button
+                            key={pct}
+                            onClick={() => {
+                              if (flowPrice > 0) setTargetPrice((flowPrice * (1 + pct / 100)).toFixed(4));
+                            }}
+                            className={`px-2.5 py-1 rounded text-[10px] font-mono cursor-pointer transition-colors duration-150 border ${
+                              pct < 0
+                                ? "border-red-500/20 text-red-400 hover:bg-red-500/10"
+                                : "border-green-500/20 text-green-400 hover:bg-green-500/10"
+                            }`}
+                          >
+                            {pct > 0 ? "+" : ""}{pct}%
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Amount + Token */}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Amount (FLOW)</label>
+                        <div className="relative">
+                          <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                            <TokenIcon token="FLOW" size={16} />
+                          </div>
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={manualAmount}
+                            onChange={(e) => setManualAmount(e.target.value)}
+                            className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150"
+                            placeholder="5"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Swap to</label>
+                        <div className="relative">
+                          <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                            <TokenIcon token={manualToken} size={18} />
+                          </div>
+                          <select
+                            value={manualToken}
+                            onChange={(e) => setManualToken(e.target.value)}
+                            className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
+                          >
+                            <option value="USDC">USDC</option>
+                            <option value="stFLOW">stFLOW</option>
+                            <option value="DUST">DUST</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary + Create */}
+                    <div className={`p-3 rounded border mb-3 text-xs font-mono ${
+                      priceDirection === "below"
+                        ? "border-red-500/20 bg-red-500/5 text-red-300"
+                        : "border-green-500/20 bg-green-500/5 text-green-300"
+                    }`}>
+                      When FLOW {priceDirection === "below" ? "drops below" : "rises above"} ${targetPrice || "—"}, swap {manualAmount || "0"} FLOW → {manualToken}
+                    </div>
+
+                    <button
+                      onClick={createFromManual}
+                      disabled={txLoading || !targetPrice || !(parseFloat(targetPrice) > 0)}
+                      className="w-full px-4 py-2.5 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50"
+                    >
+                      {txLoading ? "SENDING..." : "CREATE ORDER"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ── Non-price strategy form (DCA, Savings, Subscription) ── */
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                  {/* Token selector — hide for SAVINGS_TRANSFER & SUBSCRIPTION_PAYMENT (always FLOW) */}
+                  {manualType !== "SAVINGS_TRANSFER" && manualType !== "SUBSCRIPTION_PAYMENT" ? (
+                    <div>
+                      <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
+                        {manualType === "DCA_INVEST" ? "Buy Token" : "Token"}
+                      </label>
+                      <div className="relative">
+                        <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                          <TokenIcon token={manualToken} size={18} />
+                        </div>
+                        <select
+                          value={manualToken}
+                          onChange={(e) => setManualToken(e.target.value)}
+                          className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
+                        >
+                          <option value="USDC">USDC</option>
+                          <option value="FLOW">FLOW</option>
+                          <option value="stFLOW">stFLOW</option>
+                          <option value="DUST">DUST</option>
+                        </select>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Token</label>
+                      <div className="flex items-center gap-2 bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2">
+                        <TokenIcon token="FLOW" size={18} />
+                        <span className="text-sm font-mono text-zinc-400">FLOW</span>
+                      </div>
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">
-                      {manualType === "PRICE_DIP_BUY" ? "Drop %" : "Rise %"}
+                      {manualType === "DCA_INVEST" ? "FLOW per swap" : manualType === "SUBSCRIPTION_PAYMENT" ? "FLOW per payment" : manualType === "SAVINGS_TRANSFER" ? "FLOW per transfer" : "Amount"}
                     </label>
-                    <input
-                      type="number"
-                      min="0.1"
-                      step="0.1"
-                      value={manualPricePct}
-                      onChange={(e) => setManualPricePct(e.target.value)}
-                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
-                      placeholder="5"
-                    />
+                    <div className="relative">
+                      <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <TokenIcon token="FLOW" size={16} />
+                      </div>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={manualAmount}
+                        onChange={(e) => setManualAmount(e.target.value)}
+                        className="w-full bg-zinc-800/50 border border-zinc-800 rounded pl-8 pr-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
+                        placeholder="50"
+                      />
+                    </div>
                   </div>
-                ) : (
-                  <div>
-                    <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Frequency</label>
-                    <select
-                      value={manualInterval}
-                      onChange={(e) => setManualInterval(Number(e.target.value))}
-                      className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
-                    >
-                      {INTERVALS.map((iv) => (
-                        <option key={iv.value} value={iv.value}>{iv.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
 
-                <div className="flex items-end">
-                  <button
-                    onClick={createFromManual}
-                    disabled={txLoading}
-                    className="w-full px-4 py-2 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50"
-                  >
-                    {txLoading ? "SENDING..." : "CREATE"}
-                  </button>
+                  {/* Recipient field for subscriptions */}
+                  {manualType === "SUBSCRIPTION_PAYMENT" ? (
+                    <>
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Recipient</label>
+                        <input
+                          type="text"
+                          value={manualRecipient}
+                          onChange={(e) => setManualRecipient(e.target.value)}
+                          className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 placeholder-zinc-600"
+                          placeholder="0x..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Frequency</label>
+                        <select
+                          value={manualInterval}
+                          onChange={(e) => setManualInterval(Number(e.target.value))}
+                          className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
+                        >
+                          {INTERVALS.map((iv) => (
+                            <option key={iv.value} value={iv.value}>{iv.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  ) : (
+                    <div>
+                      <label className="block text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Frequency</label>
+                      <select
+                        value={manualInterval}
+                        onChange={(e) => setManualInterval(Number(e.target.value))}
+                        className="w-full bg-zinc-800/50 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 outline-none focus:border-amber-500/40 transition-colors duration-150 appearance-none cursor-pointer"
+                      >
+                        {INTERVALS.map((iv) => (
+                          <option key={iv.value} value={iv.value}>{iv.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex items-end">
+                    <button
+                      onClick={createFromManual}
+                      disabled={txLoading || (manualType === "SUBSCRIPTION_PAYMENT" && !manualRecipient.trim())}
+                      className="w-full px-4 py-2 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50"
+                    >
+                      {txLoading ? "SENDING..." : "CREATE"}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -841,7 +992,7 @@ export default function DashboardPage() {
                     onExecute={async () => {
                       const isReady = rule.nextExecution && new Date(rule.nextExecution) <= new Date();
                       if (!isReady) {
-                        setTxError("Strategy isn't ready yet — wait until the scheduled time passes, then try again.");
+                        toast.error("Strategy isn't ready yet — wait until the scheduled time passes, then try again.");
                         return;
                       }
                       await sendTx(() => txExecuteStrategy(Number(rule.id)), "Strategy executed");
@@ -1065,6 +1216,7 @@ function StrategyRow({
   const now = Date.now();
   const nextExecTime = rule.nextExecution ? new Date(rule.nextExecution).getTime() : 0;
   const isReady = mounted && rule.active && nextExecTime > 0 && nextExecTime <= now;
+  const isPriceStrategy = rule.ruleType === "PRICE_DIP_BUY" || rule.ruleType === "PROFIT_SELL";
 
   const statusColor = !rule.active
     ? "bg-zinc-600"
@@ -1106,9 +1258,15 @@ function StrategyRow({
           <div className="w-px h-3 bg-zinc-800 shrink-0" />
           {!mounted ? (
             <span className="text-[10px] font-mono text-zinc-600 shrink-0">---</span>
+          ) : isPriceStrategy ? (
+            <span className="text-[10px] font-mono text-amber-500/80 shrink-0 flex items-center gap-1">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+              </span>
+              Watching price...
+            </span>
           ) : isReady ? (
-            // Just passed nextExecution — show "ready" with green dot;
-            // auto-poll will update once the scheduled tx fires
             <span className="text-[10px] font-mono text-green-500 shrink-0 flex items-center gap-1">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />

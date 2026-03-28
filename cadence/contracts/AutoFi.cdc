@@ -11,6 +11,7 @@
 import "FungibleToken"
 import "FlowToken"
 import "SwapRouter"
+import "AutoFiConfig"
 
 access(all) contract AutoFi {
 
@@ -187,6 +188,11 @@ access(all) contract AutoFi {
             self.monthlySpent = self.monthlySpent + amount
             self.nextExecution = timestamp + UFix64(self.intervalSeconds)
         }
+
+        /// Advance nextExecution without recording an execution (for skipped price checks)
+        access(all) fun skipExecution(timestamp: UFix64) {
+            self.nextExecution = timestamp + UFix64(self.intervalSeconds)
+        }
     }
 
     // ──────────────────────────────────────────────
@@ -268,7 +274,7 @@ access(all) contract AutoFi {
             return <-vault
         }
 
-        /// Create a new DCA strategy
+        /// Create a new strategy
         access(Owner) fun createStrategy(
             strategyType: StrategyType,
             token: String,
@@ -276,7 +282,9 @@ access(all) contract AutoFi {
             intervalSeconds: UInt64,
             maxMonthlySpend: UFix64,
             slippageTolerance: UFix64,
-            description: String
+            description: String,
+            recipient: String,
+            priceThreshold: UFix64
         ): UInt64 {
             pre {
                 amountPerExecution > 0.0: "Amount must be positive"
@@ -299,6 +307,15 @@ access(all) contract AutoFi {
                 nextExecution: now + UFix64(intervalSeconds),
                 description: description
             )
+
+            // Store extra strategy data in AutoFiConfig (separate contract)
+            let ownerAddr = self.owner!.address
+            if recipient != "" {
+                AutoFiConfig.setRecipient(owner: ownerAddr, strategyID: id, recipient: recipient)
+            }
+            if priceThreshold > 0.0 {
+                AutoFiConfig.setPriceThreshold(owner: ownerAddr, strategyID: id, threshold: priceThreshold)
+            }
 
             self.strategies[id] = strategy
             self.nextStrategyID = self.nextStrategyID + 1
@@ -410,15 +427,80 @@ access(all) contract AutoFi {
             }
 
             let spent = strategy.amountPerExecution
-            let withdrawn <- self.flowVault.withdraw(amount: spent)
             let ownerAccount = getAccount(self.owner!.address)
 
-            // Determine swap path for this strategy's target token
-            let tokenKeyPath = AutoFi.getSwapPath(strategy.token)
-            let receiverPath = AutoFi.getReceiverPath(strategy.token)
+            // ── Branch by strategy type ──
 
-            if tokenKeyPath != nil && receiverPath != nil {
-                // ── Real DEX swap via IncrementFi SwapRouter ──
+            if strategy.strategyType == StrategyType.SAVINGS_TRANSFER {
+                // ── SAVINGS: Move FLOW from AutoFi vault → user's wallet (no swap) ──
+                let withdrawn <- self.flowVault.withdraw(amount: spent)
+                let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+                    /public/flowTokenReceiver
+                ) ?? panic("No FLOW receiver on user account")
+                receiverRef.deposit(from: <-withdrawn)
+
+            } else if strategy.strategyType == StrategyType.SUBSCRIPTION_PAYMENT {
+                // ── SUBSCRIPTION: Send FLOW to a recipient address ──
+                let withdrawn <- self.flowVault.withdraw(amount: spent)
+                let recipientStr = AutoFiConfig.getRecipient(owner: self.owner!.address, strategyID: id)
+                let recipientAddr = Address.fromString(recipientStr)
+                    ?? panic("Invalid recipient address: ".concat(recipientStr))
+                let recipientAccount = getAccount(recipientAddr)
+                let receiverRef = recipientAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+                    /public/flowTokenReceiver
+                ) ?? panic("Recipient has no FLOW receiver: ".concat(recipientStr))
+                receiverRef.deposit(from: <-withdrawn)
+
+            } else if strategy.strategyType == StrategyType.PRICE_DIP_BUY
+                      || strategy.strategyType == StrategyType.TAKE_PROFIT {
+                // ── PRICE-GATED: Check swap quote before executing ──
+                let tokenKeyPath = AutoFi.getSwapPath(strategy.token)
+                let receiverPath = AutoFi.getReceiverPath(strategy.token)
+
+                if tokenKeyPath == nil || receiverPath == nil {
+                    self.strategies[id]!.skipExecution(timestamp: now)
+                    return
+                }
+
+                // Get quote from SwapRouter (real DEX price)
+                let amounts = SwapRouter.getAmountsOut(
+                    amountIn: spent,
+                    tokenKeyPath: tokenKeyPath!
+                )
+                let expectedOut = amounts[amounts.length - 1]
+
+                let threshold = AutoFiConfig.getPriceThreshold(owner: self.owner!.address, strategyID: id)
+
+                if threshold > 0.0 {
+                    if strategy.strategyType == StrategyType.PRICE_DIP_BUY {
+                        // BUY THE DIP: execute when output is LOW (FLOW price dropped)
+                        // Threshold = output at target low price. Execute when output <= threshold.
+                        if expectedOut > threshold {
+                            self.strategies[id]!.skipExecution(timestamp: now)
+                            emit SafetyGuardTriggered(
+                                strategyID: id,
+                                owner: self.owner!.address,
+                                reason: "Price hasn't dipped enough: output ".concat(expectedOut.toString()).concat(" > threshold ").concat(threshold.toString())
+                            )
+                            return
+                        }
+                    } else {
+                        // TAKE PROFIT: execute when output is HIGH (FLOW price rose)
+                        // Threshold = output at target high price. Execute when output >= threshold.
+                        if expectedOut < threshold {
+                            self.strategies[id]!.skipExecution(timestamp: now)
+                            emit SafetyGuardTriggered(
+                                strategyID: id,
+                                owner: self.owner!.address,
+                                reason: "Price hasn't risen enough: output ".concat(expectedOut.toString()).concat(" < threshold ").concat(threshold.toString())
+                            )
+                            return
+                        }
+                    }
+                }
+
+                // Condition met — execute swap
+                let withdrawn <- self.flowVault.withdraw(amount: spent)
                 let swapped <- SwapRouter.swapExactTokensForTokens(
                     exactVaultIn: <-withdrawn,
                     amountOutMin: 0.0,
@@ -426,17 +508,10 @@ access(all) contract AutoFi {
                     deadline: now + 600.0
                 )
                 let amountOut = swapped.balance
-
                 let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
                     receiverPath!
-                )
-                if receiverRef != nil {
-                    receiverRef!.deposit(from: <-swapped)
-                } else {
-                    // User doesn't have a vault for target token — panic
-                    // (should have been set up during strategy creation)
-                    panic("No receiver for target token: ".concat(strategy.token))
-                }
+                ) ?? panic("No receiver for target token: ".concat(strategy.token))
+                receiverRef.deposit(from: <-swapped)
 
                 emit SwapExecuted(
                     strategyID: id,
@@ -445,15 +520,43 @@ access(all) contract AutoFi {
                     amountOut: amountOut,
                     targetToken: strategy.token
                 )
+
             } else {
-                // ── No swap needed — deposit FLOW back to user ──
-                let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
-                    /public/flowTokenReceiver
-                )
-                if receiverRef != nil {
-                    receiverRef!.deposit(from: <-withdrawn)
+                // ── DCA_INVEST (default): Swap FLOW → target token ──
+                let withdrawn <- self.flowVault.withdraw(amount: spent)
+                let tokenKeyPath = AutoFi.getSwapPath(strategy.token)
+                let receiverPath = AutoFi.getReceiverPath(strategy.token)
+
+                if tokenKeyPath != nil && receiverPath != nil {
+                    let swapped <- SwapRouter.swapExactTokensForTokens(
+                        exactVaultIn: <-withdrawn,
+                        amountOutMin: 0.0,
+                        tokenKeyPath: tokenKeyPath!,
+                        deadline: now + 600.0
+                    )
+                    let amountOut = swapped.balance
+                    let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+                        receiverPath!
+                    ) ?? panic("No receiver for target token: ".concat(strategy.token))
+                    receiverRef.deposit(from: <-swapped)
+
+                    emit SwapExecuted(
+                        strategyID: id,
+                        owner: self.owner!.address,
+                        amountIn: spent,
+                        amountOut: amountOut,
+                        targetToken: strategy.token
+                    )
                 } else {
-                    self.flowVault.deposit(from: <-withdrawn)
+                    // Target is FLOW — deposit back to user wallet
+                    let receiverRef = ownerAccount.capabilities.borrow<&{FungibleToken.Receiver}>(
+                        /public/flowTokenReceiver
+                    )
+                    if receiverRef != nil {
+                        receiverRef!.deposit(from: <-withdrawn)
+                    } else {
+                        self.flowVault.deposit(from: <-withdrawn)
+                    }
                 }
             }
 
