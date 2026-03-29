@@ -43,6 +43,7 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="px-5 py-5 border-b border-zinc-800/60">
         <Link href="/" className="flex items-center gap-2.5 no-underline">
+          <img src="/autofi-logo.svg" alt="AutoFi" width={28} height={28} className="rounded" />
           <span className="font-mono font-bold text-lg text-zinc-50 tracking-tight">
             AutoFi
           </span>

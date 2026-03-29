@@ -26,7 +26,7 @@ const networkConfig = config[FLOW_NETWORK as keyof typeof config] || config.test
 fcl.config({
   ...networkConfig,
   "app.detail.title": "AutoFi – Autopilot Finance",
-  "app.detail.icon": `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/logo.png`,
+  "app.detail.icon": `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/autofi-logo.svg`,
   "app.detail.description": "Automate investing, subscriptions, savings, and trading on Flow.",
 });
 

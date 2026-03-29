@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/flow-logo.svg" width="60" />
+  <img src="frontend/public/autofi-logo.svg" width="80" />
 </p>
 
 <h1 align="center">AutoFi — Your DCA on Autopilot</h1>

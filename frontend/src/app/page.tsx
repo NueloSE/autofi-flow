@@ -128,6 +128,7 @@ export default function LandingPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 border-b border-zinc-800/30 bg-zinc-950/80 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <img src="/autofi-logo.svg" alt="AutoFi" width={26} height={26} className="rounded" />
             <span className="font-mono font-bold text-base text-zinc-50 tracking-tight">
               AutoFi
             </span>
@@ -625,6 +626,7 @@ export default function LandingPage() {
       <footer className="border-t border-zinc-800/30 px-6">
         <div className="max-w-6xl mx-auto py-6 flex items-center justify-between">
           <div className="flex items-center gap-4">
+            <img src="/autofi-logo.svg" alt="AutoFi" width={22} height={22} className="rounded" />
             <span className="font-mono font-bold text-sm text-zinc-50">AutoFi</span>
             <div className="w-px h-3 bg-zinc-800" />
             <span className="text-[11px] font-mono text-zinc-700">Built on Flow</span>

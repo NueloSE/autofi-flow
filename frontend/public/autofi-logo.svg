@@ -1,0 +1,49 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="80" cy="80" r="78" fill="#0C0C0E" stroke="url(#ring)" stroke-width="2"/>
+
+  <!-- Gradient ring -->
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="160" y2="160">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="pulse" x1="20" y1="80" x2="140" y2="80">
+      <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.3"/>
+      <stop offset="40%" stop-color="#F59E0B"/>
+      <stop offset="60%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706" stop-opacity="0.3"/>
+    </linearGradient>
+    <linearGradient id="letterGrad" x1="50" y1="40" x2="110" y2="120">
+      <stop offset="0%" stop-color="#F5F5F4"/>
+      <stop offset="100%" stop-color="#A8A29E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Automation pulse line (behind the letter) -->
+  <polyline
+    points="24,88 40,88 48,68 56,98 64,58 72,88 80,78"
+    fill="none"
+    stroke="url(#pulse)"
+    stroke-width="2.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <polyline
+    points="80,78 88,88 96,72 104,92 112,82 120,88 136,88"
+    fill="none"
+    stroke="url(#pulse)"
+    stroke-width="2.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- "A" letterform — geometric, bold -->
+  <path
+    d="M80 38L56 118H68L73.5 102H86.5L92 118H104L80 38Z M76.5 92L80 80L83.5 92H76.5Z"
+    fill="url(#letterGrad)"
+  />
+
+  <!-- Small dot accent (automation indicator) -->
+  <circle cx="80" cy="128" r="3" fill="#F59E0B"/>
+</svg>
