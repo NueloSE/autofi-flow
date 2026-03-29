@@ -1,6 +1,6 @@
 import { AutomationRule } from "@/store/useAutoFiStore";
 
-export function parseNaturalLanguage(input: string): Partial<AutomationRule> | null {
+export function parseNaturalLanguage(input: string, currentFlowPrice?: number): Partial<AutomationRule> | null {
   const lower = input.toLowerCase().trim();
 
   // ── Token detection (default USDC) ──
@@ -56,22 +56,43 @@ export function parseNaturalLanguage(input: string): Partial<AutomationRule> | n
     else if (lower.includes("hourly")) { interval = 3600; intervalLabel = "hourly"; }
   }
 
-  // ── Price target detection ($X.XX or "below/above $X") ──
-  const priceTargetMatch = lower.match(/(?:below|under|above|over)\s*\$?(\d+(?:\.\d+)?)/);
-  const priceTarget = priceTargetMatch ? parseFloat(priceTargetMatch[1]) : 0;
+  // ── Price target detection ──
+  // Supports: "$0.025", "below $0.03", "5%", "drops 10%"
+  let priceTarget = 0;
+  const priceAbsMatch = lower.match(/(?:below|under|above|over|at|to)\s*\$(\d+(?:\.\d+)?)/);
+  const pctMatch = lower.match(/(\d+(?:\.\d+)?)%/);
+
+  if (priceAbsMatch) {
+    priceTarget = parseFloat(priceAbsMatch[1]);
+  } else if (pctMatch && currentFlowPrice && currentFlowPrice > 0) {
+    const pct = parseFloat(pctMatch[1]);
+    // Determine direction from context
+    const isDip = lower.includes("drop") || lower.includes("dip") || lower.includes("fall") || lower.includes("below");
+    const isRise = lower.includes("rise") || lower.includes("above") || lower.includes("profit") || lower.includes("gain");
+    if (isDip) {
+      priceTarget = +(currentFlowPrice * (1 - pct / 100)).toFixed(6);
+    } else if (isRise) {
+      priceTarget = +(currentFlowPrice * (1 + pct / 100)).toFixed(6);
+    } else {
+      // Default: treat as dip for "buy the dip" context
+      priceTarget = +(currentFlowPrice * (1 - pct / 100)).toFixed(6);
+    }
+  }
 
   // ── Rule type detection ──
 
   // Price: "buy when flow drops below $0.03" / "sell when flow rises above $0.04"
   if ((lower.includes("drop") || lower.includes("dip") || lower.includes("fall") || lower.includes("below") || lower.includes("under"))
     && (lower.includes("buy") || lower.includes("swap") || lower.includes("when"))) {
+    const targetToken = token === "FLOW" ? "USDC" : token;
+    const pctLabel = pctMatch ? ` (${pctMatch[1]}% drop)` : "";
     const desc = priceTarget > 0
-      ? `Buy ${token} with ${amount} FLOW when FLOW drops below $${priceTarget}`
-      : `Buy ${token} with ${amount} FLOW when price dips`;
+      ? `Buy ${targetToken} with ${amount} FLOW when FLOW drops below $${priceTarget}${pctLabel}`
+      : `Buy ${targetToken} with ${amount} FLOW when price dips`;
     return {
       ruleType: "PRICE_DIP_BUY",
       triggerType: "PRICE",
-      token: token === "FLOW" ? "USDC" : token,
+      token: targetToken,
       amount,
       referencePrice: priceTarget,
       interval: 1800,
@@ -81,13 +102,15 @@ export function parseNaturalLanguage(input: string): Partial<AutomationRule> | n
 
   if ((lower.includes("rise") || lower.includes("above") || lower.includes("over") || lower.includes("profit") || lower.includes("gain"))
     && (lower.includes("sell") || lower.includes("swap") || lower.includes("when") || lower.includes("take"))) {
+    const targetToken = token === "FLOW" ? "USDC" : token;
+    const pctLabel = pctMatch ? ` (${pctMatch[1]}% rise)` : "";
     const desc = priceTarget > 0
-      ? `Sell ${amount} FLOW → ${token === "FLOW" ? "USDC" : token} when FLOW rises above $${priceTarget}`
-      : `Sell ${amount} FLOW → ${token === "FLOW" ? "USDC" : token} when price rises`;
+      ? `Sell ${amount} FLOW → ${targetToken} when FLOW rises above $${priceTarget}${pctLabel}`
+      : `Sell ${amount} FLOW → ${targetToken} when price rises`;
     return {
       ruleType: "PROFIT_SELL",
       triggerType: "PRICE",
-      token: token === "FLOW" ? "USDC" : token,
+      token: targetToken,
       amount,
       referencePrice: priceTarget,
       interval: 1800,

@@ -37,9 +37,8 @@ import {
   Wallet,
   TrendingUp,
   Zap,
-  SlidersHorizontal,
 } from "lucide-react";
-import { formatDistanceToNow, format } from "date-fns";
+import { format } from "date-fns";
 
 const RULE_TYPES: { value: RuleType; label: string; trigger: TriggerType }[] = [
   { value: "DCA_INVEST", label: "DCA Invest", trigger: "TIME" },
@@ -51,14 +50,14 @@ const RULE_TYPES: { value: RuleType; label: string; trigger: TriggerType }[] = [
 
 const INTERVALS: { value: number; label: string }[] = [
   { value: 0, label: "One-time" },
-  { value: 60, label: "1 min" },
-  { value: 300, label: "5 min" },
-  { value: 900, label: "15 min" },
-  { value: 3600, label: "1 hour" },
-  { value: 14400, label: "4 hours" },
-  { value: 86400, label: "Daily" },
-  { value: 604800, label: "Weekly" },
-  { value: 2592000, label: "Monthly" },
+  { value: 60, label: "Every 1 min" },
+  { value: 300, label: "Every 5 min" },
+  { value: 900, label: "Every 15 min" },
+  { value: 3600, label: "Every 1 hour" },
+  { value: 14400, label: "Every 4 hours" },
+  { value: 86400, label: "Every day" },
+  { value: 604800, label: "Every week" },
+  { value: 2592000, label: "Every month" },
 ];
 
 // Map on-chain strategy → frontend AutomationRule
@@ -123,7 +122,6 @@ export default function DashboardPage() {
   const [txLoading, setTxLoading] = useState(false);
 
   // Creation mode
-  const [mode, setMode] = useState<"nlp" | "manual">("nlp");
 
   // NLP state
   const [commandInput, setCommandInput] = useState("");
@@ -135,7 +133,6 @@ export default function DashboardPage() {
   const [manualToken, setManualToken] = useState("USDC");
   const [manualAmount, setManualAmount] = useState("50");
   const [manualInterval, setManualInterval] = useState(604800);
-  const [manualPricePct, setManualPricePct] = useState("5");
   const [manualRecipient, setManualRecipient] = useState("");
   const [priceDirection, setPriceDirection] = useState<"below" | "above">("below");
   const [targetPrice, setTargetPrice] = useState("");
@@ -256,7 +253,7 @@ export default function DashboardPage() {
 
   const handleCommand = () => {
     if (!commandInput.trim()) return;
-    const result = parseNaturalLanguage(commandInput);
+    const result = parseNaturalLanguage(commandInput, flowPrice);
     if (result) {
       setParsedRule(result);
       setParseError("");
@@ -424,103 +421,79 @@ export default function DashboardPage() {
         className="mb-8"
       >
         <div className="border border-zinc-800 rounded-lg overflow-hidden bg-zinc-900/60 backdrop-blur-sm">
-          {/* Header with mode toggle */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/60">
-            <div className="flex items-center gap-2">
-              <Terminal size={13} className="text-amber-500" />
-              <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
-                Create Strategy
-              </span>
-            </div>
-            <div className="flex items-center bg-zinc-800/50 rounded p-0.5">
+
+          {/* ── Natural Language Command Bar (always visible) ── */}
+          <div className="px-4 pt-4 pb-2">
+            <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3 py-2 focus-within:border-amber-500/40 transition-colors duration-200">
+              <Sparkles size={14} className="text-amber-500 shrink-0" />
+              <input
+                value={commandInput}
+                onChange={(e) => {
+                  setCommandInput(e.target.value);
+                  setParseError("");
+                  setParsedRule(null);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleCommand()}
+                placeholder='Describe a strategy — "Buy 5 USDC every week" or "Buy the dip at 5%"'
+                className="flex-1 bg-transparent border-none outline-none text-sm font-mono text-zinc-200 placeholder-zinc-500"
+              />
               <button
-                onClick={() => setMode("nlp")}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-mono cursor-pointer transition-colors duration-150 border-0
-                  ${mode === "nlp"
-                    ? "bg-amber-500/15 text-amber-500"
-                    : "bg-transparent text-zinc-500 hover:text-zinc-400"
-                  }`}
+                onClick={handleCommand}
+                disabled={txLoading || !commandInput.trim()}
+                className="px-3 py-1 bg-amber-500 text-zinc-950 rounded text-[11px] font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 shrink-0 disabled:opacity-30"
               >
-                <Sparkles size={10} /> Natural
-              </button>
-              <button
-                onClick={() => setMode("manual")}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-mono cursor-pointer transition-colors duration-150 border-0
-                  ${mode === "manual"
-                    ? "bg-amber-500/15 text-amber-500"
-                    : "bg-transparent text-zinc-500 hover:text-zinc-400"
-                  }`}
-              >
-                <SlidersHorizontal size={10} /> Manual
+                GO
               </button>
             </div>
+
+            <AnimatePresence>
+              {parseError && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mt-2 text-xs font-mono text-red-400"
+                >
+                  {parseError}
+                </motion.div>
+              )}
+              {parsedRule && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <TokenIcon token={parsedRule.token || "FLOW"} size={16} />
+                    <span className="text-[13px] text-zinc-200 font-mono truncate">{parsedRule.description}</span>
+                    {parsedRule.ruleType && <RuleTypeBadge type={parsedRule.ruleType} />}
+                  </div>
+                  <button
+                    onClick={createFromParsed}
+                    disabled={txLoading}
+                    className="px-4 py-1.5 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50 shrink-0"
+                  >
+                    {txLoading ? "..." : "CREATE"}
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          {/* NLP Mode */}
-          {mode === "nlp" && (
-            <>
-              <div className="flex items-center gap-3 px-4 py-3">
-                <span className="text-amber-500 text-sm font-mono shrink-0">$</span>
-                <input
-                  value={commandInput}
-                  onChange={(e) => {
-                    setCommandInput(e.target.value);
-                    setParseError("");
-                    setParsedRule(null);
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && handleCommand()}
-                  placeholder='Buy $50 of FLOW every week'
-                  className="flex-1 bg-transparent border-none outline-none text-sm font-mono text-zinc-200 placeholder-zinc-600"
-                />
-                <button
-                  onClick={handleCommand}
-                  disabled={txLoading}
-                  className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded text-amber-500 text-xs font-mono font-medium cursor-pointer hover:bg-amber-500/20 transition-colors duration-150 flex items-center gap-1.5 shrink-0 disabled:opacity-50"
-                >
-                  Parse <ChevronRight size={12} />
-                </button>
-              </div>
+          {/* Divider */}
+          <div className="mx-4 my-1 flex items-center gap-3">
+            <div className="flex-1 h-px bg-zinc-800/60" />
+            <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest">or build manually</span>
+            <div className="flex-1 h-px bg-zinc-800/60" />
+          </div>
 
-              <AnimatePresence>
-                {parseError && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="px-4 py-2.5 border-t border-zinc-800/60 text-xs font-mono text-red-400"
-                  >
-                    {parseError}
-                  </motion.div>
-                )}
-                {parsedRule && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="px-4 py-3 border-t border-amber-500/10 bg-amber-500/3 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-mono text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">PARSED</span>
-                      <TokenIcon token={parsedRule.token || "FLOW"} size={16} />
-                      <span className="text-sm text-zinc-300 font-mono">{parsedRule.description}</span>
-                      {parsedRule.ruleType && <RuleTypeBadge type={parsedRule.ruleType} />}
-                    </div>
-                    <button
-                      onClick={createFromParsed}
-                      disabled={txLoading}
-                      className="px-4 py-1.5 bg-amber-500 text-zinc-950 rounded text-xs font-mono font-bold cursor-pointer hover:bg-amber-400 transition-colors duration-150 disabled:opacity-50"
-                    >
-                      {txLoading ? "SENDING..." : "CREATE"}
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </>
-          )}
-
-          {/* Manual Mode */}
-          {mode === "manual" && (
+          {/* ── Manual Mode (always visible) ── */}
             <div className="px-4 py-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Terminal size={13} className="text-amber-500" />
+                <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">New Strategy</span>
+              </div>
               <div className="flex flex-wrap gap-1.5 mb-4">
                 {RULE_TYPES.map((rt) => (
                   <button
@@ -537,13 +510,13 @@ export default function DashboardPage() {
                 ))}
               </div>
 
-              {/* Contextual hint */}
+              {/* Contextual hint — updates live with selected token, amount, interval */}
               <p className="text-[11px] font-mono text-zinc-600 mb-3">
-                {manualType === "DCA_INVEST" && <>Swap <span className="text-zinc-400">FLOW</span> from your vault → <span className="text-zinc-400">{manualToken}</span> on a recurring schedule</>}
-                {manualType === "SAVINGS_TRANSFER" && <>Auto-transfer <span className="text-zinc-400">FLOW</span> from vault back to your wallet on a schedule (no swap)</>}
-                {manualType === "SUBSCRIPTION_PAYMENT" && <>Auto-send <span className="text-zinc-400">FLOW</span> to a recipient address on a recurring schedule</>}
-                {manualType === "PRICE_DIP_BUY" && <>Set price targets. When FLOW drops below your target, AutoFi auto-swaps via IncrementFi.</>}
-                {manualType === "PROFIT_SELL" && <>Set price targets. When FLOW rises above your target, AutoFi locks gains automatically.</>}
+                {manualType === "DCA_INVEST" && <>Swap <span className="text-zinc-400">{manualAmount || "—"} FLOW</span> → <span className="text-zinc-400">{manualToken}</span> {manualInterval === 0 ? "once" : (INTERVALS.find(i => i.value === manualInterval)?.label.toLowerCase() || "weekly")}</>}
+                {manualType === "SAVINGS_TRANSFER" && <>Transfer <span className="text-zinc-400">{manualAmount || "—"} FLOW</span> to your wallet {manualInterval === 0 ? "once" : (INTERVALS.find(i => i.value === manualInterval)?.label.toLowerCase() || "weekly")} (no swap)</>}
+                {manualType === "SUBSCRIPTION_PAYMENT" && <>Send <span className="text-zinc-400">{manualAmount || "—"} FLOW</span> to <span className="text-zinc-400">{manualRecipient || "recipient"}</span> {manualInterval === 0 ? "once" : (INTERVALS.find(i => i.value === manualInterval)?.label.toLowerCase() || "weekly")}</>}
+                {manualType === "PRICE_DIP_BUY" && <>Buy <span className="text-zinc-400">{manualToken}</span> with <span className="text-zinc-400">{manualAmount || "—"} FLOW</span> when FLOW drops below <span className="text-zinc-400">${targetPrice || "—"}</span></>}
+                {manualType === "PROFIT_SELL" && <>Sell <span className="text-zinc-400">{manualAmount || "—"} FLOW</span> → <span className="text-zinc-400">{manualToken}</span> when FLOW rises above <span className="text-zinc-400">${targetPrice || "—"}</span></>}
               </p>
 
               {/* ── Price Strategy UI (chart + order form) ── */}
@@ -790,7 +763,6 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
-          )}
         </div>
       </motion.div>
 
